@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
 const INITIAL_QUESTIONS = [
   "What's your age?",
   'How do you identify in terms of gender?',
@@ -68,7 +66,7 @@ export default function Dashboard({ token, user, onUserUpdate }) {
 
   async function loadHistory() {
     try {
-      const res = await fetch(`${API_URL}/api/chat/history`, {
+      const res = await fetch('/api/chat/history', {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
@@ -126,13 +124,22 @@ export default function Dashboard({ token, user, onUserUpdate }) {
     setIsProcessing(true);
     setError(null);
     try {
-      const formData = new FormData();
-      formData.append('audio', blob, 'recording.webm');
+      // Convert blob → base64 for serverless (no file system)
+      const arrayBuffer = await blob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
 
-      const res = await fetch(`${API_URL}/api/chat/message`, {
+      const res = await fetch('/api/chat/message', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ audio: base64 }),
       });
 
       if (!res.ok) {

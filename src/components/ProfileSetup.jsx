@@ -1,7 +1,5 @@
 import { useState } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
 export default function ProfileSetup({ token, user, onSetup }) {
   const [bitName, setBitName] = useState('');
   const [saving, setSaving] = useState(false);
@@ -12,7 +10,7 @@ export default function ProfileSetup({ token, user, onSetup }) {
 
     setSaving(true);
     try {
-      const res = await fetch(`${API_URL}/api/profile/setup`, {
+      const res = await fetch('/api/profile/setup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

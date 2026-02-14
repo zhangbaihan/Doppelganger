@@ -3,8 +3,6 @@ import Login from './components/Login';
 import ProfileSetup from './components/ProfileSetup';
 import Dashboard from './components/Dashboard';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('dg_token'));
   const [user, setUser] = useState(null);
@@ -20,7 +18,7 @@ export default function App() {
 
   async function fetchProfile() {
     try {
-      const res = await fetch(`${API_URL}/api/profile`, {
+      const res = await fetch('/api/profile', {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Session expired');
