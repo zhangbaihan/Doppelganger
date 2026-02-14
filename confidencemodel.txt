@@ -1,0 +1,122 @@
+Trait Confidence Model
+
+The system does not assign a single static personality score to a user. Instead, it maintains a structured map of inferred traits. Each trait has a position (where the user currently falls on the spectrum) and a confidence percentage (how certain the system is about that inference).
+
+Profile maturity is defined as the aggregate confidence across all core traits.
+
+Each trait’s confidence score ranges from 0 to 100 percent and evolves over time as additional behavioral data is collected through voice interactions.
+
+Core Trait Maps
+
+The system organizes traits into four structured domains.
+
+1️⃣ Identity Resolution
+
+How clearly defined and internally coherent the person is.
+
+Signals:
+
+Stable self-description across sessions
+
+Clear values
+
+Consistent life narrative
+
+Low contradiction drift
+
+Low maturity:
+
+Vague, reactive, contradictory
+
+High maturity:
+
+Coherent, differentiated, grounded
+
+2️⃣ Behavioral Specificity
+
+How concrete their answers are.
+
+Signals:
+
+Real examples vs abstractions
+
+Story density
+
+Temporal markers (“last week”, “when I was 18…”)
+
+Situational detail
+
+Low:
+
+“I’m chill.”
+High:
+“When plans change last minute, I get irritated but I usually…”
+
+3️⃣ Emotional Resolution
+
+How well they can identify and describe emotional states.
+
+Signals:
+
+Emotional vocabulary range
+
+Self-reflection
+
+Ownership language (“I tend to…” vs “People always…”)
+
+Regulation description
+
+4️⃣ Social Pattern Clarity
+
+How predictable their relational style is.
+
+Signals:
+
+Clear conflict style
+
+Clear intimacy pattern
+
+Recognizable attachment tendencies
+
+Repeatable group role
+
+Unclear pattern = low maturity
+Stable pattern = high maturity
+
+Confidence Computation Model
+
+Each trait has an associated confidence score that increases or decreases based on evidence. Confidence is not based on time spent speaking, but on the quality and stability of behavioral signals.
+
+Confidence is computed using four components.
+
+1. Signal Volume
+
+Confidence increases as the system collects independent signals supporting a trait inference.
+
+Repeated examples of behavior, especially across different contexts, strengthen the reliability of the trait position. Independent supporting signals increase confidence proportionally.
+
+2. Signal Consistency
+
+Confidence increases when new evidence aligns with prior inferences.
+
+If new behavioral data contradicts earlier signals, confidence decreases. Contradictions do not immediately change the trait position, but they reduce certainty until a stable pattern re-emerges.
+
+3. Behavioral Specificity Weighting
+
+Behavioral examples are weighted more heavily than abstract self-descriptions.
+
+Concrete narratives describing specific situations, actions, and reactions carry higher evidentiary weight than general identity statements. The system assigns greater influence to observable behaviors than to trait labels.
+
+4. Temporal Stability
+
+Confidence increases when trait inferences remain stable across multiple sessions over time.
+
+If a trait position remains consistent despite new data inputs, the system applies a stability multiplier that increases certainty. Frequent fluctuation reduces this multiplier and lowers confidence.
+
+Conceptual Confidence Formula
+
+For each trait:
+
+Confidence equals the weighted sum of supporting signals minus the weighted sum of contradictory signals, adjusted by a temporal stability multiplier.
+
+The resulting value is bounded between 0 and 100 percent.
