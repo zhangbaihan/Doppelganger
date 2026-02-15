@@ -1,0 +1,20 @@
+{"location":"simulationEngine.js:15","message":"Before dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":false,"keyLength":0,"keyPrefix":"undefined"},"timestamp":1771114499929,"runId":"initial","hypothesisId":"A"}
+{"location":"simulationEngine.js:18","message":"After dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":true,"keyLength":164,"keyPrefix":"sk-proj-nY"},"timestamp":1771114499946,"runId":"initial","hypothesisId":"A"}
+{"location":"simulationEngine.js:15","message":"Before dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":false,"keyLength":0,"keyPrefix":"undefined"},"timestamp":1771114500989,"runId":"initial","hypothesisId":"A"}
+{"location":"simulationEngine.js:18","message":"After dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":true,"keyLength":164,"keyPrefix":"sk-proj-nY"},"timestamp":1771114500999,"runId":"initial","hypothesisId":"A"}
+{"location":"server.js:30","message":"Before dotenv.config() in server.js","data":{"hasKey":true},"timestamp":1771114501000,"runId":"initial","hypothesisId":"B"}
+{"location":"server.js:33","message":"After dotenv.config() in server.js","data":{"hasKey":true,"keyLength":164},"timestamp":1771114501000,"runId":"initial","hypothesisId":"B"}
+{"location":"simulationEngine.js:15","message":"Before dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":false,"keyLength":0,"keyPrefix":"undefined"},"timestamp":1771114506018,"runId":"initial","hypothesisId":"A"}
+{"location":"simulationEngine.js:18","message":"After dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":true,"keyLength":164,"keyPrefix":"sk-proj-nY"},"timestamp":1771114506029,"runId":"initial","hypothesisId":"A"}
+{"location":"server.js:31","message":"Before dotenv.config() in server.js","data":{"hasKey":true},"timestamp":1771114506030,"runId":"initial","hypothesisId":"B"}
+{"location":"server.js:35","message":"After dotenv.config() in server.js","data":{"hasKey":true,"keyLength":164},"timestamp":1771114506030,"runId":"initial","hypothesisId":"B"}
+{"location":"simulationEngine.js:15","message":"Before dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":false,"keyLength":0,"keyPrefix":"undefined"},"timestamp":1771114508615,"runId":"initial","hypothesisId":"A"}
+{"location":"simulationEngine.js:18","message":"After dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":true,"keyLength":164,"keyPrefix":"sk-proj-nY"},"timestamp":1771114508624,"runId":"initial","hypothesisId":"A"}
+{"location":"server.js:31","message":"Before dotenv.config() in server.js","data":{"hasKey":true},"timestamp":1771114508625,"runId":"initial","hypothesisId":"B"}
+{"location":"server.js:35","message":"After dotenv.config() in server.js","data":{"hasKey":true,"keyLength":164},"timestamp":1771114508626,"runId":"initial","hypothesisId":"B"}
+{"location":"simulationEngine.js:15","message":"Before dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":false,"keyLength":0,"keyPrefix":"undefined"},"timestamp":1771114878451,"runId":"initial","hypothesisId":"A"}
+{"location":"simulationEngine.js:18","message":"After dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":true,"keyLength":164,"keyPrefix":"sk-proj-nY"},"timestamp":1771114878462,"runId":"initial","hypothesisId":"A"}
+{"location":"server.js:31","message":"Before dotenv.config() in server.js","data":{"hasKey":true},"timestamp":1771114878463,"runId":"initial","hypothesisId":"B"}
+{"location":"server.js:35","message":"After dotenv.config() in server.js","data":{"hasKey":true,"keyLength":164},"timestamp":1771114878463,"runId":"initial","hypothesisId":"B"}
+{"location":"simulationEngine.js:15","message":"Before dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":false,"keyLength":0,"keyPrefix":"undefined"},"timestamp":1771114985100,"runId":"initial","hypothesisId":"A"}
+{"location":"simulationEngine.js:18","message":"After dotenv.config() - checking OPENAI_API_KEY","data":{"hasKey":true,"keyLength":164,"keyPrefix":"sk-proj-nY"},"timestamp":1771114985110,"runId":"initial","hypothesisId":"A"}

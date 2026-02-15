@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import SimulationConfig from './SimulationConfig';
+import SimulationViewer from './SimulationViewer';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -28,6 +30,7 @@ const SCORE_DOMAINS = [
 ];
 
 export default function Dashboard({ token, user, onUserUpdate }) {
+  const [view, setView] = useState('training'); // 'training' or 'simulations'
   const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -44,6 +47,9 @@ export default function Dashboard({ token, user, onUserUpdate }) {
     }
   );
   const [isTrained, setIsTrained] = useState(!!user.is_trained);
+  const [simulations, setSimulations] = useState([]);
+  const [selectedSimulationId, setSelectedSimulationId] = useState(null);
+  const [showConfig, setShowConfig] = useState(false);
 
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -53,7 +59,10 @@ export default function Dashboard({ token, user, onUserUpdate }) {
 
   useEffect(() => {
     loadHistory();
-  }, []);
+    if (view === 'simulations') {
+      loadSimulations();
+    }
+  }, [view]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -81,6 +90,45 @@ export default function Dashboard({ token, user, onUserUpdate }) {
     } catch (err) {
       console.error('Failed to load history:', err);
     }
+  }
+
+  async function loadSimulations() {
+    try {
+      const res = await fetch(`${API_URL}/api/simulations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSimulations(data.simulations || []);
+      }
+    } catch (err) {
+      console.error('Failed to load simulations:', err);
+    }
+  }
+
+  function handleSimulationCreated(simulationId) {
+    setSelectedSimulationId(simulationId);
+    setShowConfig(false);
+    loadSimulations();
+    // Start the simulation
+    fetch(`${API_URL}/api/simulations/${simulationId}/run`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(() => {
+      // Poll for status
+      const pollInterval = setInterval(async () => {
+        const statusRes = await fetch(`${API_URL}/api/simulations/${simulationId}/status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          if (status.status === 'completed') {
+            clearInterval(pollInterval);
+            loadSimulations();
+          }
+        }
+      }, 2000);
+    });
   }
 
   /* ── Recording ───────────────────────────────────────────────── */
@@ -165,9 +213,112 @@ export default function Dashboard({ token, user, onUserUpdate }) {
 
   /* ── Render ──────────────────────────────────────────────────── */
 
+  if (view === 'simulations') {
+    return (
+      <div className="dashboard">
+        {error && <div className="error-toast">{error}</div>}
+
+        {/* Tab navigation */}
+        <div className="dashboard-tabs">
+          <button
+            className={`tab-btn ${view === 'training' ? 'active' : ''}`}
+            onClick={() => setView('training')}
+          >
+            TRAINING
+          </button>
+          <button
+            className={`tab-btn ${view === 'simulations' ? 'active' : ''}`}
+            onClick={() => setView('simulations')}
+          >
+            SIMULATIONS
+          </button>
+        </div>
+
+        {/* Simulations view */}
+        {showConfig ? (
+          <SimulationConfig
+            token={token}
+            currentUser={user}
+            onSimulationCreated={handleSimulationCreated}
+          />
+        ) : selectedSimulationId ? (
+          <SimulationViewer token={token} simulationId={selectedSimulationId} />
+        ) : (
+          <div className="simulations-list">
+            <div className="simulations-header">
+              <h3 className="section-title">SIMULATIONS</h3>
+              <button className="config-submit-btn" onClick={() => setShowConfig(true)}>
+                + NEW SIMULATION
+              </button>
+            </div>
+            {simulations.length === 0 ? (
+              <div className="simulations-empty">
+                <p>No simulations yet. Create one to get started!</p>
+              </div>
+            ) : (
+              <div className="simulations-grid">
+                {simulations.map((sim) => (
+                  <div
+                    key={sim.id}
+                    className="simulation-card"
+                    onClick={() => {
+                      setSelectedSimulationId(sim.id);
+                      setShowConfig(false);
+                    }}
+                  >
+                    <h4>{sim.name || 'Untitled Simulation'}</h4>
+                    <div className="sim-status">
+                      Status: <span className={`status-${sim.status}`}>{sim.status}</span>
+                    </div>
+                    <div className="sim-meta">
+                      {sim.num_simulations} simulation{sim.num_simulations !== 1 ? 's' : ''}
+                    </div>
+                    <div className="sim-date">
+                      {new Date(sim.created_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Back button */}
+        {(showConfig || selectedSimulationId) && (
+          <button
+            className="back-btn"
+            onClick={() => {
+              setShowConfig(false);
+              setSelectedSimulationId(null);
+              loadSimulations();
+            }}
+          >
+            ← Back to Simulations
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="dashboard">
       {error && <div className="error-toast">{error}</div>}
+
+      {/* Tab navigation */}
+      <div className="dashboard-tabs">
+        <button
+          className={`tab-btn ${view === 'training' ? 'active' : ''}`}
+          onClick={() => setView('training')}
+        >
+          TRAINING
+        </button>
+        <button
+          className={`tab-btn ${view === 'simulations' ? 'active' : ''}`}
+          onClick={() => setView('simulations')}
+        >
+          SIMULATIONS
+        </button>
+      </div>
 
       {/* Bit character */}
       <div className="bit-section">

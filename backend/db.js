@@ -32,6 +32,51 @@ export function initDb() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS simulations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT,
+      config TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      num_simulations INTEGER DEFAULT 1,
+      current_sim_index INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS simulation_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      simulation_id INTEGER NOT NULL,
+      run_index INTEGER NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (simulation_id) REFERENCES simulations(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS simulation_states (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      simulation_run_id INTEGER NOT NULL,
+      state_index INTEGER NOT NULL,
+      agent_positions TEXT NOT NULL,
+      transcript TEXT NOT NULL,
+      items TEXT,
+      narrative_events TEXT,
+      timestamp REAL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (simulation_run_id) REFERENCES simulation_runs(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS simulation_participants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      simulation_id INTEGER NOT NULL,
+      user_id INTEGER,
+      is_random INTEGER DEFAULT 0,
+      role TEXT,
+      FOREIGN KEY (simulation_id) REFERENCES simulations(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
   `);
 }
 
@@ -72,4 +117,98 @@ export function addConversation(userId, userMessage, agentResponse) {
     userMessage,
     agentResponse
   );
+}
+
+/* ── Simulation functions ────────────────────────────────────────── */
+
+export function createSimulation(userId, name, config, numSimulations) {
+  const stmt = db.prepare(
+    'INSERT INTO simulations (user_id, name, config, num_simulations) VALUES (?, ?, ?, ?)'
+  );
+  const result = stmt.run(userId, name, JSON.stringify(config), numSimulations);
+  return result.lastInsertRowid;
+}
+
+export function getSimulation(simulationId) {
+  return db.prepare('SELECT * FROM simulations WHERE id = ?').get(simulationId);
+}
+
+export function getSimulationsByUserId(userId) {
+  return db.prepare('SELECT * FROM simulations WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+}
+
+export function updateSimulation(simulationId, data) {
+  const fields = [];
+  const values = [];
+  for (const [key, value] of Object.entries(data)) {
+    fields.push(`${key} = ?`);
+    values.push(value);
+  }
+  values.push(simulationId);
+  db.prepare(`UPDATE simulations SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function createSimulationRun(simulationId, runIndex) {
+  const stmt = db.prepare(
+    'INSERT INTO simulation_runs (simulation_id, run_index, status) VALUES (?, ?, ?)'
+  );
+  const result = stmt.run(simulationId, runIndex, 'pending');
+  return result.lastInsertRowid;
+}
+
+export function getSimulationRun(runId) {
+  return db.prepare('SELECT * FROM simulation_runs WHERE id = ?').get(runId);
+}
+
+export function getSimulationRuns(simulationId) {
+  return db
+    .prepare('SELECT * FROM simulation_runs WHERE simulation_id = ? ORDER BY run_index ASC')
+    .all(simulationId);
+}
+
+export function updateSimulationRun(runId, data) {
+  const fields = [];
+  const values = [];
+  for (const [key, value] of Object.entries(data)) {
+    fields.push(`${key} = ?`);
+    values.push(value);
+  }
+  values.push(runId);
+  db.prepare(`UPDATE simulation_runs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function addSimulationState(runId, stateIndex, agentPositions, transcript, items, narrativeEvents, timestamp) {
+  db.prepare(
+    'INSERT INTO simulation_states (simulation_run_id, state_index, agent_positions, transcript, items, narrative_events, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(
+    runId,
+    stateIndex,
+    JSON.stringify(agentPositions),
+    transcript,
+    items ? JSON.stringify(items) : null,
+    narrativeEvents ? JSON.stringify(narrativeEvents) : null,
+    timestamp
+  );
+}
+
+export function getSimulationStates(runId) {
+  return db
+    .prepare('SELECT * FROM simulation_states WHERE simulation_run_id = ? ORDER BY state_index ASC')
+    .all(runId);
+}
+
+export function addSimulationParticipant(simulationId, userId, isRandom, role) {
+  db.prepare(
+    'INSERT INTO simulation_participants (simulation_id, user_id, is_random, role) VALUES (?, ?, ?, ?)'
+  ).run(simulationId, userId, isRandom ? 1 : 0, role);
+}
+
+export function getSimulationParticipants(simulationId) {
+  return db
+    .prepare('SELECT * FROM simulation_participants WHERE simulation_id = ?')
+    .all(simulationId);
+}
+
+export function getAllUsers() {
+  return db.prepare('SELECT id, name, bit_name, is_trained FROM users WHERE bit_name IS NOT NULL').all();
 }

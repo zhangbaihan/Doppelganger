@@ -14,7 +14,19 @@ import {
   updateUser,
   getConversations,
   addConversation,
+  createSimulation,
+  getSimulation,
+  getSimulationsByUserId,
+  updateSimulation,
+  createSimulationRun,
+  getSimulationRuns,
+  updateSimulationRun,
+  getSimulationStates,
+  addSimulationParticipant,
+  getSimulationParticipants,
+  getAllUsers,
 } from './db.js';
+import { runSimulation } from './simulationEngine.js';
 
 dotenv.config();
 
@@ -136,6 +148,11 @@ function parseUser(user) {
 
 /* ── Routes ───────────────────────────────────────────────────────── */
 
+// Root route
+app.get('/', (req, res) => {
+  res.json({ message: 'Doppelganger API Server', version: '1.0.0' });
+});
+
 // Google OAuth
 app.post('/api/auth/google', async (req, res) => {
   try {
@@ -251,6 +268,188 @@ app.post('/api/chat/message', authenticate, upload.single('audio'), async (req, 
       } catch {}
     }
     res.status(500).json({ error: 'Failed to process message. Please try again.' });
+  }
+});
+
+/* ── Simulation routes ───────────────────────────────────────────── */
+
+// Create a new simulation
+app.post('/api/simulations/create', authenticate, async (req, res) => {
+  try {
+    const { name, items, participants, numSimulations } = req.body;
+
+    if (!items || !Array.isArray(items)) {
+      return res.status(400).json({ error: 'Items array is required' });
+    }
+    if (!participants || !Array.isArray(participants) || participants.length < 1) {
+      return res.status(400).json({ error: 'At least one participant is required' });
+    }
+    if (!numSimulations || numSimulations < 1) {
+      return res.status(400).json({ error: 'Number of simulations must be at least 1' });
+    }
+
+    const config = { items, participants };
+    const simulationId = createSimulation(req.userId, name || 'Untitled Simulation', config, numSimulations);
+
+    // Add participants
+    participants.forEach((p, index) => {
+      if (p.isRandom) {
+        addSimulationParticipant(simulationId, null, true, `agent${index + 1}`);
+      } else {
+        addSimulationParticipant(simulationId, p.userId, false, `agent${index + 1}`);
+      }
+    });
+
+    res.json({ simulationId, message: 'Simulation created successfully' });
+  } catch (error) {
+    console.error('Create simulation error:', error);
+    res.status(500).json({ error: 'Failed to create simulation' });
+  }
+});
+
+// Get all simulations for user
+app.get('/api/simulations', authenticate, (req, res) => {
+  try {
+    const simulations = getSimulationsByUserId(req.userId);
+    res.json({ simulations });
+  } catch (error) {
+    console.error('Get simulations error:', error);
+    res.status(500).json({ error: 'Failed to get simulations' });
+  }
+});
+
+// Get simulation details
+app.get('/api/simulations/:id', authenticate, (req, res) => {
+  try {
+    const simulation = getSimulation(parseInt(req.params.id));
+    if (!simulation || simulation.user_id !== req.userId) {
+      return res.status(404).json({ error: 'Simulation not found' });
+    }
+
+    const participants = getSimulationParticipants(simulation.id);
+    const runs = getSimulationRuns(simulation.id);
+
+    res.json({
+      simulation: {
+        ...simulation,
+        config: JSON.parse(simulation.config),
+      },
+      participants,
+      runs,
+    });
+  } catch (error) {
+    console.error('Get simulation error:', error);
+    res.status(500).json({ error: 'Failed to get simulation' });
+  }
+});
+
+// Start running simulations (async)
+app.post('/api/simulations/:id/run', authenticate, async (req, res) => {
+  try {
+    const simulation = getSimulation(parseInt(req.params.id));
+    if (!simulation || simulation.user_id !== req.userId) {
+      return res.status(404).json({ error: 'Simulation not found' });
+    }
+
+    if (simulation.status === 'running') {
+      return res.status(400).json({ error: 'Simulation is already running' });
+    }
+
+    const config = JSON.parse(simulation.config);
+    updateSimulation(simulation.id, { status: 'running', current_sim_index: 0 });
+
+    // Create simulation runs
+    for (let i = 0; i < simulation.num_simulations; i++) {
+      createSimulationRun(simulation.id, i);
+    }
+
+    // Start running simulations in background (non-blocking)
+    (async () => {
+      try {
+        for (let i = 0; i < simulation.num_simulations; i++) {
+          updateSimulation(simulation.id, { current_sim_index: i });
+          await runSimulation(simulation.id, i, config);
+        }
+        updateSimulation(simulation.id, {
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.error('Simulation run error:', error);
+        updateSimulation(simulation.id, { status: 'failed' });
+      }
+    })();
+
+    res.json({ message: 'Simulation started', simulationId: simulation.id });
+  } catch (error) {
+    console.error('Run simulation error:', error);
+    res.status(500).json({ error: 'Failed to start simulation' });
+  }
+});
+
+// Get simulation status
+app.get('/api/simulations/:id/status', authenticate, (req, res) => {
+  try {
+    const simulation = getSimulation(parseInt(req.params.id));
+    if (!simulation || simulation.user_id !== req.userId) {
+      return res.status(404).json({ error: 'Simulation not found' });
+    }
+
+    const runs = getSimulationRuns(simulation.id);
+    const completedRuns = runs.filter((r) => r.status === 'completed').length;
+
+    res.json({
+      status: simulation.status,
+      currentSimIndex: simulation.current_sim_index,
+      numSimulations: simulation.num_simulations,
+      completedRuns,
+      progress: simulation.num_simulations > 0 ? (completedRuns / simulation.num_simulations) * 100 : 0,
+    });
+  } catch (error) {
+    console.error('Get simulation status error:', error);
+    res.status(500).json({ error: 'Failed to get status' });
+  }
+});
+
+// Get simulation run data (for viewing)
+app.get('/api/simulations/:id/runs/:runIndex', authenticate, (req, res) => {
+  try {
+    const simulation = getSimulation(parseInt(req.params.id));
+    if (!simulation || simulation.user_id !== req.userId) {
+      return res.status(404).json({ error: 'Simulation not found' });
+    }
+
+    const runs = getSimulationRuns(simulation.id);
+    const run = runs.find((r) => r.run_index === parseInt(req.params.runIndex));
+    if (!run) {
+      return res.status(404).json({ error: 'Simulation run not found' });
+    }
+
+    const states = getSimulationStates(run.id);
+    const parsedStates = states.map((s) => ({
+      stateIndex: s.state_index,
+      agentPositions: JSON.parse(s.agent_positions),
+      transcript: s.transcript,
+      items: s.items ? JSON.parse(s.items) : [],
+      narrativeEvents: s.narrative_events ? JSON.parse(s.narrative_events) : [],
+      timestamp: s.timestamp,
+    }));
+
+    res.json({ states: parsedStates, run });
+  } catch (error) {
+    console.error('Get simulation run error:', error);
+    res.status(500).json({ error: 'Failed to get simulation run' });
+  }
+});
+
+// Get available users for participant selection
+app.get('/api/simulations/available-users', authenticate, (req, res) => {
+  try {
+    const users = getAllUsers();
+    res.json({ users: users.filter((u) => u.id !== req.userId && u.is_trained === 1) });
+  } catch (error) {
+    console.error('Get available users error:', error);
+    res.status(500).json({ error: 'Failed to get available users' });
   }
 });
 
