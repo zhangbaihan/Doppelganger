@@ -10,6 +10,27 @@ import { apiHandler } from '../_lib/handler.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+/* ── Whisper hallucination cleanup ────────────────────────────────── */
+
+const WHISPER_HALLUCINATIONS = [
+  /^\s*transcribing voice\.?\s*/i,
+  /^\s*thank(s| you) for (watching|listening|viewing)[\.\!]?\s*/i,
+  /^\s*subscribe to (our|my|the) channel[\.\!]?\s*/i,
+  /^\s*please subscribe[\.\!]?\s*/i,
+  /^\s*like and subscribe[\.\!]?\s*/i,
+  /^\s*you\s*$/i,
+  /^\s*\.+\s*$/,
+];
+
+function cleanTranscription(text) {
+  if (!text) return text;
+  let cleaned = text.trim();
+  for (const pattern of WHISPER_HALLUCINATIONS) {
+    cleaned = cleaned.replace(pattern, '').trim();
+  }
+  return cleaned;
+}
+
 /* ── Empty knowledge base scaffold ───────────────────────────────── */
 
 const EMPTY_KB = {
@@ -310,8 +331,9 @@ export default apiHandler(async (req, res) => {
     const transcription = await openai.audio.transcriptions.create({
       model: 'whisper-1',
       file,
+      prompt: 'The user is speaking naturally about themselves, their life, thoughts, and experiences.',
     });
-    userMessage = transcription.text;
+    userMessage = cleanTranscription(transcription.text);
     if (!userMessage || !userMessage.trim()) {
       return res
         .status(400)
