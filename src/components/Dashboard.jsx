@@ -773,16 +773,17 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
               <div ref={chatEndRef} />
             </div>
           </div>
-
+          
           <div className="record-section">
             {isProcessing ? (
               <div className="processing-indicator">
+                <span className="processing-text">Processing</span>
                 <div className="processing-dots">
                   <span />
                   <span />
                   <span />
                 </div>
-                <span className="processing-text">Processing...</span>
+
               </div>
             ) : (
               <>
