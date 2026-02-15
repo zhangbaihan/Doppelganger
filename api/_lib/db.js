@@ -176,6 +176,14 @@ export async function getConversations(userId, limit = 50, type = null) {
   return result.rows;
 }
 
+export async function clearConversations(userId, type) {
+  const db = await initDb();
+  await db.execute({
+    sql: 'DELETE FROM conversations WHERE user_id = ? AND conversation_type = ?',
+    args: [userId, type],
+  });
+}
+
 export async function addConversation(userId, userMessage, agentResponse, conversationType = 'training') {
   const db = await initDb();
   await db.execute({

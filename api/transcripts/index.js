@@ -1,6 +1,7 @@
 import {
   createTranscript,
   getTranscriptsByUserId,
+  clearConversations,
 } from '../_lib/db.js';
 import { verifyToken } from '../_lib/auth.js';
 import { apiHandler } from '../_lib/handler.js';
@@ -40,6 +41,8 @@ export default apiHandler(async (req, res) => {
     }
     const displayName = typeof name === 'string' && name.trim() ? name.trim() : defaultTranscriptName(transcriptType);
     const id = await createTranscript(decoded.userId, displayName, transcriptType, safeMessages);
+    // Clear live conversation rows so the chat viewer starts fresh
+    await clearConversations(decoded.userId, transcriptType);
     return res.status(201).json({ id, name: displayName, type: transcriptType });
   }
 
