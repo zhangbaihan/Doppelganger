@@ -203,12 +203,18 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
           setConversationStarterPrompt(null);
         }
       } else {
-        setMessages(
-          data.conversations.map((c) => ({ role: 'user', text: c.user_message }))
-        );
-      }
-      if (chatMode === 'training') {
+        const history = data.conversations.flatMap((c) => [
+          ...(c.user_message ? [{ role: 'user', text: c.user_message }] : []),
+          ...(c.agent_response ? [{ role: 'assistant', text: c.agent_response }] : []),
+        ]);
+        setMessages(history);
         setAllTrainingData(data.conversations);
+      }
+      // Only conversation mode gets a starter prompt from Bit
+      if (chatMode === 'freestyle' && data.conversations.length === 0) {
+        setConversationStarterPrompt(PROMPTS[Math.floor(Math.random() * PROMPTS.length)]);
+      } else {
+        setConversationStarterPrompt(null);
       }
     } catch (err) {
       console.error('Failed to load history:', err);
@@ -404,6 +410,8 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
       setMessages([]);
       if (chatMode === 'freestyle') {
         setConversationStarterPrompt(PROMPTS[Math.floor(Math.random() * PROMPTS.length)]);
+      } else {
+        setConversationStarterPrompt(null);
       }
       setError(null);
       loadSavedTranscripts();
@@ -555,7 +563,7 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
     // Show placeholder immediately so the user sees something
     setMessages((prev) => [...prev, { role: 'user', text: '(transcribing voice...)' }]);
     const body = { audio: base64, type: chatMode };
-    if (chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt) {
+    if (messages.length === 0 && conversationStarterPrompt) {
       body.initialPrompt = conversationStarterPrompt;
     }
     await sendMessage(body);
@@ -568,7 +576,7 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
     // Show user message immediately so it doesn't "disappear"
     setMessages((prev) => [...prev, { role: 'user', text: trimmed }]);
     const body = { text: trimmed, type: chatMode };
-    if (chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt) {
+    if (messages.length === 0 && conversationStarterPrompt) {
       body.initialPrompt = conversationStarterPrompt;
     }
     sendMessage(body);
@@ -876,13 +884,13 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
 
           <div className="chat-section">
             <div className="chat-messages">
-              {chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt && (
+              {messages.length === 0 && conversationStarterPrompt && (
                 <div className="chat-msg agent">
                   <span className="msg-author">{user.name?.toUpperCase()}</span>
                   <p className="msg-text">{conversationStarterPrompt}</p>
                 </div>
               )}
-              {messages.length === 0 && !(chatMode === 'freestyle' && conversationStarterPrompt) && (
+              {messages.length === 0 && !conversationStarterPrompt && (
                 <div className="chat-empty">
                   {chatMode === 'freestyle'
                     ? `Hit record and chat with your AI. You can talk about anything — your AI will reply.`
@@ -910,14 +918,42 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
                 <span className="processing-text">Processing...</span>
               </div>
             ) : (
-              <div className="record-controls-row">
-                <button
-                  className={`record-btn ${isRecording ? 'recording' : ''}`}
-                  onClick={isRecording ? stopRecording : startRecording}
-                >
-                  <div className="record-icon" />
-                  <span>{isRecording ? 'STOP' : 'RECORD'}</span>
-                </button>
+              <>
+                <div className="chat-input-row">
+                  <button
+                    className={`record-icon-btn ${isRecording ? 'recording' : ''}`}
+                    onClick={isRecording ? stopRecording : startRecording}
+                    title={isRecording ? 'Stop recording' : 'Record audio'}
+                  >
+                    {isRecording ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                    )}
+                  </button>
+                  <input
+                    type="text"
+                    className="chat-text-input"
+                    placeholder="Type a message..."
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendText();
+                      }
+                    }}
+                    disabled={isProcessing}
+                  />
+                  <button
+                    type="button"
+                    className="chat-send-btn"
+                    onClick={handleSendText}
+                    disabled={isProcessing || !inputText.trim()}
+                  >
+                    SEND
+                  </button>
+                </div>
                 <button
                   type="button"
                   className="clear-save-btn"
@@ -927,32 +963,8 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
                 >
                   CLEAR & SAVE
                 </button>
-              </div>
+              </>
             )}
-            <div className="chat-input-row">
-              <input
-                type="text"
-                className="chat-text-input"
-                placeholder="Or type a message..."
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendText();
-                  }
-                }}
-                disabled={isProcessing}
-              />
-              <button
-                type="button"
-                className="chat-send-btn"
-                onClick={handleSendText}
-                disabled={isProcessing || !inputText.trim()}
-              >
-                SEND
-              </button>
-            </div>
           </div>
         </>
       )}
