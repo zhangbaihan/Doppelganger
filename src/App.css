@@ -1539,7 +1539,6 @@ body {
 
 .sim-user-card:not(.in-world):hover {
   border-color: var(--primary);
-  transform: translateX(6px);
 }
 
 .sim-user-card:active {

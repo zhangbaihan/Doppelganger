@@ -69,41 +69,14 @@ export default function SimulationWorkspace({ token, user }) {
   const transcriptRef = useRef(null);
   const chatEndRef = useRef(null);
 
-  /* ── Persistence: restore on mount, save on unmount ────────── */
+  /* ── Init on mount ─────────────────────────────────────────── */
 
   useEffect(() => {
     loadUsers();
     loadHistory();
 
-    // Try restoring session state (survives tab switches)
-    try {
-      const saved = sessionStorage.getItem(SESSION_KEY);
-      if (saved) {
-        const s = JSON.parse(saved);
-        // A 'running' phase can't be resumed — the simulation loop isn't active.
-        // Show results if there's transcript data, otherwise fall back to setup.
-        const restoredPhase =
-          s.phase === 'running'
-            ? s.liveMessages?.length > 0
-              ? 'results'
-              : 'setup'
-            : s.phase;
-        if (restoredPhase) setPhase(restoredPhase);
-        if (s.items) setItems(s.items);
-        if (s.participants) setParticipants(s.participants);
-        if (s.goal) setGoal(s.goal);
-        if (s.simMode) setSimMode(s.simMode);
-        if (s.chatMessages) setChatMessages(s.chatMessages);
-        if (s.liveMessages) setLiveMessages(s.liveMessages);
-        if (s.agentPositions) setAgentPositions(s.agentPositions);
-        if (s.scores) setScores(s.scores);
-        if (restoredPhase !== 'running') setPairingInfo(s.pairingInfo || '');
-        sessionStorage.removeItem(SESSION_KEY);
-        return; // skip default welcome if we restored state
-      }
-    } catch (e) {
-      /* ignore parse errors */
-    }
+    // Clear any stale session data from previous versions
+    try { sessionStorage.removeItem(SESSION_KEY); } catch (e) { /* noop */ }
 
     setChatMessages([
       {
@@ -111,38 +84,6 @@ export default function SimulationWorkspace({ token, user }) {
         text: "Describe what kind of simulation you'd like to run. For example: \"I want to be matched with a date! Simulate dates with other users grabbing coffee at CoHo\" or \"Help me find a hackathon partner\". I'll set up the world for you — then you can drag things around and click Start when you're ready!",
       },
     ]);
-  }, []);
-
-  // Save state to sessionStorage on unmount (tab switch)
-  useEffect(() => {
-    return () => {
-      try {
-        // Can't use state directly in cleanup, so we use refs trick
-      } catch (e) { /* noop */ }
-    };
-  }, []);
-
-  // Use a ref to always have the latest state for the unmount save
-  const stateRef = useRef({});
-  stateRef.current = { phase, items, participants, goal, simMode, chatMessages, liveMessages, agentPositions, scores, pairingInfo };
-
-  useEffect(() => {
-    const saveSession = () => {
-      try {
-        sessionStorage.setItem(SESSION_KEY, JSON.stringify(stateRef.current));
-      } catch (e) { /* noop */ }
-    };
-
-    // Save on visibility change (tab switch) and unmount
-    const handleVisibilityChange = () => {
-      if (document.hidden) saveSession();
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      saveSession();
-    };
   }, []);
 
   useEffect(() => {
