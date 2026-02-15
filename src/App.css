@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════
-   DOPPELGANGER — Stanford 106A "Bit" Aesthetic
+   DOPPELGANGER — Stanford 106A Aesthetic
    Minimalist · Playful · Pac-Man typography · Dark retro
    ═══════════════════════════════════════════════════════════════════ */
 
@@ -2186,6 +2186,38 @@ body {
   color: var(--text-dim);
   line-height: 1.4;
 }
+
+/* ── Score tier colors ─────────────────────────────────────────── */
+
+.sim-score-bar-excellent {
+  background: linear-gradient(90deg, #10b981, #34d399);
+}
+.sim-score-bar-good {
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+}
+.sim-score-bar-above-avg {
+  background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+}
+.sim-score-bar-average {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+.sim-score-bar-below-avg {
+  background: linear-gradient(90deg, #ef4444, #f87171);
+}
+.sim-score-bar-incompatible {
+  background: linear-gradient(90deg, #6b7280, #9ca3af);
+}
+
+.sim-score-value-excellent { color: #10b981; }
+.sim-score-value-good { color: #3b82f6; }
+.sim-score-value-above-avg { color: #8b5cf6; }
+.sim-score-value-average { color: #f59e0b; }
+.sim-score-value-below-avg { color: #ef4444; }
+.sim-score-value-incompatible { color: #6b7280; }
+
+.sim-score-tier-excellent { border-color: rgba(16, 185, 129, 0.3); }
+.sim-score-tier-good { border-color: rgba(59, 130, 246, 0.2); }
+.sim-score-tier-incompatible { border-color: rgba(107, 114, 128, 0.2); opacity: 0.7; }
 
 .sim-reset-btn {
   padding: 12px;

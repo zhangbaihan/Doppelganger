@@ -8,7 +8,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 async function buildAgentSystemPrompt(agent, otherAgent, items, conversationHistory, goal) {
   const user = await getUserById(Number(agent.userId));
   if (!user) {
-    throw new Error(`User not found for agent ${agent.bitName} (userId: ${agent.userId})`);
+    throw new Error(`User not found for agent ${agent.name} (userId: ${agent.userId})`);
   }
 
   const kb = user.knowledge_base ? JSON.parse(user.knowledge_base) : null;
@@ -89,10 +89,10 @@ async function buildAgentSystemPrompt(agent, otherAgent, items, conversationHist
     }
   }
 
-  return `You are ${agent.bitName}, an AI doppelganger of ${user.name}, in a simulated social encounter.
+  return `You are ${user.name}, an AI doppelganger, in a simulated social encounter.
 
 SIMULATION GOAL: "${goal || 'Get to know each other'}"
-You are meeting ${otherAgent.bitName} (representing ${otherAgent.name}). The person who set up this simulation wants to ${goal || 'see how you two interact'}. Your conversation MUST focus on determining compatibility for this goal.
+You are meeting ${otherAgent.name}. The person who set up this simulation wants to ${goal || 'see how you two interact'}. Your conversation MUST focus on determining compatibility for this goal.
 
 ${goalGuidance}
 
@@ -105,7 +105,7 @@ ${fidelityWarning}
 SETTING:
 - Items nearby: ${itemsList || 'None'}
 - Your position: (${agent.position.x}, ${agent.position.y})
-- ${otherAgent.bitName}'s position: (${otherAgent.position.x}, ${otherAgent.position.y})
+- ${otherAgent.name}'s position: (${otherAgent.position.x}, ${otherAgent.position.y})
 
 CONVERSATION SO FAR:
 ${conversationHistory || 'You just met. Start the conversation.'}
@@ -167,8 +167,8 @@ async function processAgentTurn(agent, otherAgent, items, conversationHistory, g
       {
         role: 'user',
         content: lastLine
-          ? `Continue the conversation. ${otherAgent.bitName} just said: "${lastLine}"`
-          : `You just met ${otherAgent.bitName}. Introduce yourself in a way relevant to the goal: "${goal || 'getting to know each other'}".`,
+          ? `Continue the conversation. ${otherAgent.name} just said: "${lastLine}"`
+          : `You just met ${otherAgent.name}. Introduce yourself in a way relevant to the goal: "${goal || 'getting to know each other'}".`,
       },
     ],
     temperature: 0.5,
@@ -189,12 +189,12 @@ async function processAgentTurn(agent, otherAgent, items, conversationHistory, g
         x: targetItem.x + offset,
         y: targetItem.y + offset,
       };
-      narrativeEvent = `${agent.bitName} moves to the ${targetItem.name}`;
+      narrativeEvent = `${agent.name} moves to the ${targetItem.name}`;
     }
   }
 
   return {
-    agentName: agent.bitName,
+    agentName: agent.name,
     response,
     action,
     narrativeEvent,
@@ -207,10 +207,10 @@ async function processAgentTurnSafe(agent, otherAgent, items, conversationHistor
   try {
     return await processAgentTurn(agent, otherAgent, items, conversationHistory, goal);
   } catch (error) {
-    console.error(`Error for agent ${agent.bitName}:`, error.message);
+    console.error(`Error for agent ${agent.name}:`, error.message);
     // Return the error message so the frontend can show it
     return {
-      agentName: agent.bitName,
+      agentName: agent.name,
       response: null,
       error: error.message,
       action: { type: 'none', target: null, reasoning: '' },
@@ -240,7 +240,7 @@ export async function processOneRound(agents, items, conversationHistory, goal) 
       break;
     }
 
-    updatedHistory += `\n${currentAgent.bitName}: ${result.response}`;
+    updatedHistory += `\n${currentAgent.name}: ${result.response}`;
     if (result.narrativeEvent) {
       updatedHistory += `\n[${result.narrativeEvent}]`;
     }
@@ -273,11 +273,29 @@ export async function processOneRound(agents, items, conversationHistory, goal) 
 
 /* ── Compute compatibility scores ────────────────────────────────── */
 
+function formatProfile(profile) {
+  if (!profile || Object.keys(profile).length === 0) return 'No profile data available';
+  const parts = [];
+  if (profile.age) parts.push(`Age: ${profile.age}`);
+  if (profile.gender_identity) parts.push(`Gender: ${profile.gender_identity}`);
+  if (profile.sexual_orientation) parts.push(`Orientation: ${profile.sexual_orientation}`);
+  if (profile.race) parts.push(`Race: ${profile.race}`);
+  if (profile.height) parts.push(`Height: ${profile.height}`);
+  return parts.join(', ') || 'No profile data available';
+}
+
 export async function computeCompatibilityScores(goal, userName, pairings) {
+  const requestingProfile = pairings[0]?.requestingUserProfile || {};
+
   const pairingsStr = pairings
     .map(
       (p, i) =>
-        `PAIRING ${i + 1}: ${userName} with ${p.bitName} (${p.userName})\nTranscript:\n${p.transcript}`
+        `PAIRING ${i + 1} (userId: ${p.userId}): ${userName} with ${p.userName}
+${userName}'s profile: ${formatProfile(p.requestingUserProfile)}
+${p.userName}'s profile: ${formatProfile(p.otherUserProfile)}
+
+Transcript:
+${p.transcript}`
     )
     .join('\n\n---\n\n');
 
@@ -287,17 +305,65 @@ export async function computeCompatibilityScores(goal, userName, pairings) {
     messages: [
       {
         role: 'system',
-        content: `You evaluate compatibility between people based on a simulated conversation between their AI agents.
+        content: `You are a brutally honest compatibility analyst. You evaluate whether two people are genuinely well-matched for a specific goal. You have access to their real profiles AND a transcript of their simulated conversation.
 
-GOAL: ${goal}
+You must be RUTHLESSLY realistic. In real life, most random pairings are mediocre matches. Your scores must reflect this.
 
+GOAL: "${goal}"
 USER: ${userName}
 
 ${pairingsStr}
 
-For each pairing, evaluate how well the OTHER person matches what ${userName} is looking for given the goal "${goal}".
+═══════════════════════════════════════════════
+STEP 1: DEALBREAKER CHECK (do this FIRST)
+═══════════════════════════════════════════════
 
-Consider: conversation flow, shared interests, chemistry, mutual engagement, alignment with the stated goal.
+Before evaluating conversation quality, check for FUNDAMENTAL INCOMPATIBILITIES based on profiles and the goal. These are hard caps on the maximum possible score.
+
+For ROMANTIC / DATING goals:
+- Sexual orientation mismatch (e.g. a straight man paired with another man, a gay woman paired with a man, etc.): AUTOMATIC 0-5%. It doesn't matter how good the conversation was. These people are not viable romantic partners for each other. Period.
+- Major age gaps that would be inappropriate or impractical: cap at 15%.
+
+For PROFESSIONAL / COLLABORATION goals:
+- Orientation/gender are irrelevant. Do not factor them in.
+
+For FRIENDSHIP goals:
+- Orientation/gender are mostly irrelevant. Focus on personality and interest fit.
+
+Use common sense. Read the goal carefully. A "date" or anything romantic/sexual means orientation and gender compatibility are non-negotiable prerequisites.
+
+═══════════════════════════════════════════════
+STEP 2: CONVERSATION QUALITY (only if no dealbreakers)
+═══════════════════════════════════════════════
+
+If no dealbreakers exist, evaluate conversation quality. But remain very stringent:
+
+• Did they discuss anything SPECIFIC and PERSONAL, or was it all generic pleasantries?
+• Was there genuine mutual curiosity, or just polite turn-taking?
+• Did concrete shared interests, values, or experiences emerge — or just vague agreement?
+• Would a neutral observer watching this conversation say "these two really click" or just "they're being nice to each other"?
+• Is there anything about this specific pairing that's special, or could either person have had this exact conversation with anyone?
+
+Most conversations between strangers are POLITE but UNREMARKABLE. Politeness is not chemistry. Agreement is not alignment. Shared surface interests are not deep compatibility.
+
+═══════════════════════════════════════════════
+CALIBRATION (YOUR NORTH STAR)
+═══════════════════════════════════════════════
+
+• 0-5%:   INCOMPATIBLE — Fundamental dealbreaker (e.g. orientation mismatch for dating). No further analysis needed.
+• 6-20%:  POOR — No meaningful connection. Conversation was generic, strained, or irrelevant to the goal.
+• 21-35%: BELOW AVERAGE — A few surface commonalities. This is where MOST random pairings land.
+• 36-50%: AVERAGE — Some genuine shared interests and decent rapport. Nothing special, but not bad.
+• 51-65%: ABOVE AVERAGE — Real, specific overlaps. You'd say "there's something here worth exploring." Top ~25%.
+• 66-78%: GOOD — Strong, substantive compatibility with clear evidence. You'd actively recommend they meet. Top ~10%.
+• 79-88%: EXCELLENT — Rare. Multiple dimensions of deep alignment plus real chemistry. Top ~3%.
+• 89-100%: EXTRAORDINARY — Almost never given. Once-in-a-hundred pairing. Deep values alignment, electric chemistry, unique complementarity, and specific evidence for all of it.
+
+The MEDIAN score across all pairings should be 25-35%. If your average is above 50%, you are being way too generous.
+
+═══════════════════════════════════════════════
+OUTPUT FORMAT
+═══════════════════════════════════════════════
 
 Respond with valid JSON:
 {
@@ -305,15 +371,16 @@ Respond with valid JSON:
     {
       "userId": <number>,
       "score": <0-100>,
-      "reasoning": "<1-2 sentence explanation>"
+      "dealbreaker": <true/false>,
+      "reasoning": "<2-3 sentences. If dealbreaker, explain why. Otherwise, be specific: cite actual moments from the transcript that justify the score. Explain both what worked AND what was lacking.>"
     }
   ]
 }
 
-Be honest and differentiate. Not everyone is a good match. Scores should vary meaningfully.`,
+FINAL REMINDER: A score of 50% already means "better than most pairings." A score of 70%+ means "these two should absolutely meet." A score of 80%+ means "I'd bet money on this." Be honest. Be harsh. Be real.`,
       },
     ],
-    temperature: 0.5,
+    temperature: 0.2,
   });
 
   const result = JSON.parse(completion.choices[0].message.content);

@@ -64,7 +64,7 @@ export default function App() {
     return <Login onLogin={handleLogin} />;
   }
 
-  if (!user.bit_name || !user.profile_data) {
+  if (!user.name || !user.profile_data) {
     return <ProfileSetup token={token} user={user} onSetup={handleProfileSetup} onLogout={handleLogout} />;
   }
 

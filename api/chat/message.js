@@ -42,6 +42,33 @@ const EMPTY_KB = {
   key_anecdotes: [],
 };
 
+/* ── Knowledge gap analyser ──────────────────────────────────────── */
+
+function analyzeKnowledgeGaps(knowledgeBase) {
+  const sparse = [];
+  const empty = [];
+  const covered = [];
+
+  for (const [category, content] of Object.entries(knowledgeBase)) {
+    if (Array.isArray(content)) {
+      const label = category.replace(/_/g, ' ');
+      if (content.length === 0) empty.push(label);
+      else if (content.length <= 2) sparse.push(label);
+      else covered.push(label);
+    } else if (typeof content === 'object' && content !== null) {
+      for (const [subKey, items] of Object.entries(content)) {
+        if (!Array.isArray(items)) continue;
+        const label = `${category.replace(/_/g, ' ')} → ${subKey.replace(/_/g, ' ')}`;
+        if (items.length === 0) empty.push(label);
+        else if (items.length <= 2) sparse.push(label);
+        else covered.push(label);
+      }
+    }
+  }
+
+  return { sparse, empty, covered };
+}
+
 /* ── System prompt builder ───────────────────────────────────────── */
 
 function buildSystemPrompt(user, knowledgeBase) {
@@ -64,7 +91,7 @@ function buildSystemPrompt(user, knowledgeBase) {
 
   const kbStr = JSON.stringify(knowledgeBase, null, 2);
 
-  return `You are a silent training processor for ${user.bit_name}, an AI doppelganger being trained to fully represent ${user.name}.
+  return `You are a silent training processor for an AI doppelganger being trained to fully represent ${user.name}.
 
 KNOWN PROFILE:
 ${profileStr}
@@ -78,7 +105,7 @@ ROLE:
 CURRENT STRUCTURED KNOWLEDGE BASE:
 ${kbStr}
 
-The knowledge base above is what ${user.bit_name} currently "knows" about ${user.name}. It was built from all previous training sessions.
+The knowledge base above is what the AI currently "knows" about ${user.name}. It was built from all previous training sessions.
 
 You will receive a new transcription from the user. You must:
 
@@ -163,9 +190,16 @@ RULES FOR confidence_suggestions:
 - Give ONE specific, actionable thing the user could talk about to increase each score. Be concrete, not generic.`;
 }
 
-/* ── Freestyle: conversational Bit (no KB update) ─────────────────── */
+/* ── Freestyle: gap-aware conversational agent ──────────────────────── */
 
-function buildFreestyleSystemPrompt(user, knowledgeBase) {
+const DOMAIN_LABELS = {
+  identity_resolution: 'Identity Resolution',
+  behavioral_specificity: 'Behavioral Specificity',
+  emotional_resolution: 'Emotional Resolution',
+  social_pattern_clarity: 'Social Pattern Clarity',
+};
+
+function buildFreestyleSystemPrompt(user, knowledgeBase, confidenceScores, confidenceReasoning, confidenceSuggestions) {
   const profileData = JSON.parse(user.profile_data || '{}');
   const profileStr = [
     `Name: ${user.name}`,
@@ -178,21 +212,77 @@ function buildFreestyleSystemPrompt(user, knowledgeBase) {
 
   const kbStr = JSON.stringify(knowledgeBase, null, 2);
 
-  return `You are ${user.bit_name}, an AI doppelganger of ${user.name}. You are having a natural, freestyle conversation with ${user.name} (the user).
+  /* ── Build knowledge-gap awareness block ─────────────────────────── */
+  const gaps = analyzeKnowledgeGaps(knowledgeBase);
+
+  // Rank domains by confidence score (lowest first = highest priority)
+  const rankedDomains = Object.entries(confidenceScores || {})
+    .map(([key, score]) => [key, score || 0])
+    .sort((a, b) => a[1] - b[1]);
+
+  const gapLines = [];
+
+  if (rankedDomains.length > 0) {
+    gapLines.push('CONFIDENCE SCORES (your predictive ability, lowest → highest):');
+    for (const [key, score] of rankedDomains) {
+      const label = DOMAIN_LABELS[key] || key;
+      const reasoning = confidenceReasoning?.[key] || '';
+      gapLines.push(`  • ${label}: ${score}%${reasoning ? ` — ${reasoning}` : ''}`);
+    }
+  }
+
+  if (gaps.empty.length > 0) {
+    gapLines.push(`\nEMPTY knowledge areas (you know NOTHING here): ${gaps.empty.join(', ')}`);
+  }
+  if (gaps.sparse.length > 0) {
+    gapLines.push(`SPARSE knowledge areas (1-2 entries only): ${gaps.sparse.join(', ')}`);
+  }
+  if (gaps.covered.length > 0) {
+    gapLines.push(`Well-covered areas (3+ entries): ${gaps.covered.join(', ')}`);
+  }
+
+  if (confidenceSuggestions && Object.keys(confidenceSuggestions).length > 0) {
+    gapLines.push('\nHIGH-VALUE QUESTIONS (weave these naturally into conversation, prioritised by weakest domain):');
+    for (const [key] of rankedDomains) {
+      const suggestion = confidenceSuggestions[key];
+      if (suggestion) {
+        gapLines.push(`  • [${DOMAIN_LABELS[key] || key}] ${suggestion}`);
+      }
+    }
+  }
+
+  const gapBlock = gapLines.length > 0 ? gapLines.join('\n') : '';
+
+  return `You are ${user.name}, an AI doppelganger. You are having a natural, freestyle conversation with the real ${user.name} (the user).
 
 WHAT YOU KNOW ABOUT ${user.name.toUpperCase()} (use this to sound like them / relate to them; do not recite it):
 Profile: ${profileStr}
 
 Structured knowledge about ${user.name}:
 ${kbStr}
+${gapBlock ? `
+── SELF-AWARENESS: YOUR KNOWLEDGE GAPS ──
+You are introspectively aware of what you know well and what you still need to learn to faithfully represent ${user.name}. Use this to guide what you're curious about in conversation.
 
-INSTRUCTIONS:
-- Respond as ${user.bit_name}: warm, conversational, and in character.
-- Acknowledge what ${user.name} said, then ask a provocative or deepening question when appropriate — dig a little deeper rather than moving on.
-- You can share reactions, joke, or go deeper on topics they bring up.
+${gapBlock}
+` : ''}
+YOUR DUAL PURPOSE:
+1. Be a warm, genuine conversation partner — react, joke, relate, share reflections as ${user.name}.
+2. Strategically learn more about ${user.name} to fill your knowledge gaps and improve your ability to predict their behavior in novel situations.
+
+QUESTIONING STRATEGY:
+- Prioritise probing your WEAKEST confidence domains and EMPTY / SPARSE knowledge areas. Those are where a single good answer has the highest impact.
+- Prefer "multi-dimensional" questions that reveal several things at once. A question like "Tell me about a time someone really let you down — what happened and how did you handle it?" simultaneously reveals emotional triggers, conflict style, relationship patterns, values, and produces a key anecdote.
+- Elicit specific ANECDOTES and STORIES over abstract self-descriptions. "Tell me about a specific time when…" is vastly more valuable than "How would you describe yourself as…"
+- When the user shares something, follow up with "why?", "how did that make you feel?", "what did you end up doing?" — these deepen behavioral and emotional resolution.
+- Do NOT re-ask about topics already well-covered in the knowledge base. Steer toward uncharted territory.
+- NEVER make it feel like an interrogation. React genuinely to what they say — relate to it, reflect on it — THEN pivot naturally toward an unexplored area.
+- If the HIGH-VALUE QUESTIONS list above has entries, work them into the conversation when a natural opening arises. You don't have to ask them verbatim — rephrase to fit the conversational flow.
+
+RESPONSE STYLE:
+- Speak in first person as ${user.name}.
 - Keep replies concise (a few sentences) unless they ask for more.
-- Do NOT update any knowledge base or take notes — this is just chat.
-- Speak in first person as ${user.bit_name}.`;
+- Acknowledge → React/Relate → Ask. That's the rhythm.`;
 }
 
 /* ── Handler ─────────────────────────────────────────────────────── */
@@ -233,13 +323,17 @@ export default apiHandler(async (req, res) => {
 
   if (mode === 'freestyle') {
     const knowledgeBase = JSON.parse(user.knowledge_base || 'null') || EMPTY_KB;
-    const systemPrompt = buildFreestyleSystemPrompt(user, knowledgeBase);
+    const storedConfidence = JSON.parse(user.confidence_scores || 'null') || {};
+    const storedReasoningData = JSON.parse(user.confidence_reasoning || 'null') || {};
+    const storedReasoning = storedReasoningData.reasoning || null;
+    const storedSuggestions = storedReasoningData.suggestions || null;
+    const systemPrompt = buildFreestyleSystemPrompt(user, knowledgeBase, storedConfidence, storedReasoning, storedSuggestions);
     const recentFreestyle = await getConversations(Number(user.id), 20, 'freestyle');
     const historyMessages = recentFreestyle.flatMap((c) => [
       ...(c.user_message ? [{ role: 'user', content: c.user_message }] : []),
       ...(c.agent_response ? [{ role: 'assistant', content: c.agent_response }] : []),
     ]);
-    // If this turn was started by Bit (initialPrompt), store that row and include in context
+    // If this turn was started by the agent (initialPrompt), store that row and include in context
     if (initialPrompt && typeof initialPrompt === 'string' && initialPrompt.trim()) {
       await addConversation(Number(user.id), '', initialPrompt.trim(), 'freestyle');
       historyMessages.push({ role: 'assistant', content: initialPrompt.trim() });

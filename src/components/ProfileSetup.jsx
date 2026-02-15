@@ -35,7 +35,7 @@ export default function ProfileSetup({ token, user, onSetup, onLogout }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ ...form, bitName: `${form.realName.trim().split(/\s+/)[0]}'s Bit` }),
+        body: JSON.stringify({ ...form, bitName: form.realName.trim() }),
       });
       if (!res.ok) throw new Error('Setup failed');
       const data = await res.json();
@@ -54,7 +54,7 @@ export default function ProfileSetup({ token, user, onSetup, onLogout }) {
         <div className="bit-shape setup-bit">
           <div className="bit-inner" />
         </div>
-        <h1 className="setup-title">SET UP YOUR BIT</h1>
+        <h1 className="setup-title">SET UP YOUR PROFILE</h1>
         <p className="setup-subtitle">
           Complete your profile so your AI doppelganger can start learning.
         </p>
@@ -137,7 +137,7 @@ export default function ProfileSetup({ token, user, onSetup, onLogout }) {
             className="setup-btn"
             disabled={!isValid || saving}
           >
-            {saving ? 'CREATING...' : 'CREATE BIT'}
+            {saving ? 'CREATING...' : 'CREATE PROFILE'}
           </button>
         </form>
       </div>

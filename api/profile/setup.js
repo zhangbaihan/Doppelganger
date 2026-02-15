@@ -14,7 +14,7 @@ export default apiHandler(async (req, res) => {
     req.body || {};
 
   if (!bitName || !bitName.trim()) {
-    return res.status(400).json({ error: 'Bit name is required' });
+    return res.status(400).json({ error: 'Name is required' });
   }
   if (!realName || !realName.trim()) {
     return res.status(400).json({ error: 'Real name is required' });

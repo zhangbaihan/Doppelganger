@@ -1,6 +1,7 @@
 import { processOneRound, computeCompatibilityScores } from '../_lib/simulationEngine.js';
 import { verifyToken } from '../_lib/auth.js';
 import { apiHandler } from '../_lib/handler.js';
+import { getUserById, parseUser } from '../_lib/db.js';
 
 export default apiHandler(async (req, res) => {
   if (req.method !== 'POST') {
@@ -49,7 +50,22 @@ export default apiHandler(async (req, res) => {
       return res.status(400).json({ error: 'Goal and pairings are required' });
     }
 
-    const scores = await computeCompatibilityScores(goal, userName || 'User', pairings);
+    // Fetch profile data for the requesting user and all paired users
+    const requestingUser = parseUser(await getUserById(decoded.userId));
+    const requestingProfile = requestingUser?.profile_data || {};
+
+    const pairingsWithProfiles = await Promise.all(
+      pairings.map(async (p) => {
+        const otherUser = parseUser(await getUserById(p.userId));
+        return {
+          ...p,
+          requestingUserProfile: requestingProfile,
+          otherUserProfile: otherUser?.profile_data || {},
+        };
+      })
+    );
+
+    const scores = await computeCompatibilityScores(goal, userName || 'User', pairingsWithProfiles);
 
     // Merge names back into scores
     const enrichedScores = scores.map((s) => {

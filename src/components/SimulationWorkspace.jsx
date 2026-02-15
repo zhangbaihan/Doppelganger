@@ -67,7 +67,15 @@ export default function SimulationWorkspace({ token, user }) {
       const saved = sessionStorage.getItem(SESSION_KEY);
       if (saved) {
         const s = JSON.parse(saved);
-        if (s.phase) setPhase(s.phase);
+        // A 'running' phase can't be resumed — the simulation loop isn't active.
+        // Show results if there's transcript data, otherwise fall back to setup.
+        const restoredPhase =
+          s.phase === 'running'
+            ? s.liveMessages?.length > 0
+              ? 'results'
+              : 'setup'
+            : s.phase;
+        if (restoredPhase) setPhase(restoredPhase);
         if (s.items) setItems(s.items);
         if (s.participants) setParticipants(s.participants);
         if (s.goal) setGoal(s.goal);
@@ -75,7 +83,7 @@ export default function SimulationWorkspace({ token, user }) {
         if (s.liveMessages) setLiveMessages(s.liveMessages);
         if (s.agentPositions) setAgentPositions(s.agentPositions);
         if (s.scores) setScores(s.scores);
-        if (s.pairingInfo) setPairingInfo(s.pairingInfo);
+        if (restoredPhase !== 'running') setPairingInfo(s.pairingInfo || '');
         sessionStorage.removeItem(SESSION_KEY);
         return; // skip default welcome if we restored state
       }
@@ -200,7 +208,7 @@ export default function SimulationWorkspace({ token, user }) {
 
     setParticipants((prev) => [
       ...prev,
-      { userId, name: u.name, bitName: u.bit_name, position: { x, y } },
+      { userId, name: u.name, bitName: u.name, position: { x, y } },
     ]);
   }
 
@@ -325,7 +333,7 @@ export default function SimulationWorkspace({ token, user }) {
               {
                 userId: args.userId,
                 name: u.name,
-                bitName: u.bit_name,
+                bitName: u.name,
                 position: {
                   x: BOARD_W / 2 + Math.cos(angle) * 100,
                   y: BOARD_H / 2 + Math.sin(angle) * 100,
@@ -382,8 +390,8 @@ export default function SimulationWorkspace({ token, user }) {
       const others = allUsers.filter((u) => Number(u.id) !== currentUserId);
       pairings = others.map((other) => ({
         agents: [
-          { userId: currentUserId, name: user.name, bitName: user.bit_name, role: 'agent1' },
-          { userId: Number(other.id), name: other.name, bitName: other.bit_name, role: 'agent2' },
+          { userId: currentUserId, name: user.name, bitName: user.name, role: 'agent1' },
+          { userId: Number(other.id), name: other.name, bitName: other.name, role: 'agent2' },
         ],
       }));
     } else {
@@ -393,7 +401,7 @@ export default function SimulationWorkspace({ token, user }) {
           pairings = [
             {
               agents: [
-                { userId: currentUserId, name: user.name, bitName: user.bit_name, role: 'agent1' },
+                { userId: currentUserId, name: user.name, bitName: user.name, role: 'agent1' },
                 {
                   userId: currentParticipants[0].userId,
                   name: currentParticipants[0].name,
@@ -692,24 +700,29 @@ export default function SimulationWorkspace({ token, user }) {
             <div className="sim-scores-list">
               {[...scores]
                 .sort((a, b) => (b.score || 0) - (a.score || 0))
-                .map((s, i) => (
-                  <div key={s.userId || i} className="sim-score-card">
-                    <div className="sim-score-rank">#{i + 1}</div>
-                    <div className="sim-score-info">
-                      <div className="sim-score-name">{s.bitName || s.userName}</div>
-                      <div className="sim-score-bar-bg">
-                        <div
-                          className="sim-score-bar"
-                          style={{ width: `${s.score || 0}%` }}
-                        />
+                .map((s, i) => {
+                  const sc = s.score || 0;
+                  const tier =
+                    sc >= 79 ? 'excellent' : sc >= 66 ? 'good' : sc >= 51 ? 'above-avg' : sc >= 36 ? 'average' : sc >= 6 ? 'below-avg' : 'incompatible';
+                  return (
+                    <div key={s.userId || i} className={`sim-score-card sim-score-tier-${tier}`}>
+                      <div className="sim-score-rank">#{i + 1}</div>
+                      <div className="sim-score-info">
+                        <div className="sim-score-name">{s.userName || s.bitName}</div>
+                        <div className="sim-score-bar-bg">
+                          <div
+                            className={`sim-score-bar sim-score-bar-${tier}`}
+                            style={{ width: `${sc}%` }}
+                          />
+                        </div>
+                        <div className={`sim-score-value sim-score-value-${tier}`}>{sc}%</div>
+                        {s.reasoning && (
+                          <div className="sim-score-reason">{s.reasoning}</div>
+                        )}
                       </div>
-                      <div className="sim-score-value">{s.score || 0}%</div>
-                      {s.reasoning && (
-                        <div className="sim-score-reason">{s.reasoning}</div>
-                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
             </div>
             <button
               className="sim-reset-btn"
@@ -756,11 +769,10 @@ export default function SimulationWorkspace({ token, user }) {
                         onDragStart={(e) => handleDragStart(e, Number(u.id))}
                       >
                         <div className="sim-user-avatar">
-                          {(u.bit_name || u.name || '?')[0].toUpperCase()}
+                          {(u.name || '?')[0].toUpperCase()}
                         </div>
                         <div className="sim-user-info">
-                          <span className="sim-user-name">{u.bit_name}</span>
-                          <span className="sim-user-real">{u.name}</span>
+                          <span className="sim-user-name">{u.name}</span>
                         </div>
                         {inWorld && <span className="sim-user-badge">IN WORLD</span>}
                       </div>
@@ -937,6 +949,18 @@ export default function SimulationWorkspace({ token, user }) {
                 if (abortControllerRef.current) {
                   abortControllerRef.current.abort();
                 }
+                // Failsafe: if the loop isn't running (e.g. restored ghost session),
+                // the abort won't trigger a phase change. Force it after a short delay.
+                setTimeout(() => {
+                  setPhase((current) => {
+                    if (current === 'running') {
+                      setThinkingAgent(null);
+                      setPairingInfo('');
+                      return liveMessages.length > 0 ? 'results' : 'setup';
+                    }
+                    return current;
+                  });
+                }, 500);
               }}
             >
               STOP

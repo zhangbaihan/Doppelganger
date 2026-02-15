@@ -32,7 +32,7 @@ export default function Login({ onLogin }) {
           <div className="bit-inner" />
         </div>
         <h1 className="app-title">DOPPELGANGER</h1>
-        <p className="app-subtitle">Let your AI Bit go on dates for you, before you do!</p>
+        <p className="app-subtitle">Let your AI doppelganger go on dates for you, before you do!</p>
         {error && <div className="error-toast" style={{ position: 'static', transform: 'none' }}>{error}</div>}
         {loading && <p className="app-subtitle">Signing in...</p>}
         <div className="google-btn-wrapper">

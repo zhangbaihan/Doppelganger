@@ -48,7 +48,7 @@ const tools = [
     type: 'function',
     function: {
       name: 'add_participant',
-      description: 'Add a specific user\'s Bit (AI agent) to the simulation by their user ID',
+      description: 'Add a specific user\'s AI agent to the simulation by their user ID',
       parameters: {
         type: 'object',
         properties: {
@@ -141,14 +141,14 @@ export default apiHandler(async (req, res) => {
   // Fetch available users for context
   const allUsers = await getAllUsers();
   const usersStr = allUsers
-    .map((u) => `- ID: ${u.id}, Name: ${u.name}, Bit: ${u.bit_name}`)
+    .map((u) => `- ID: ${u.id}, Name: ${u.name}`)
     .join('\n');
 
   const state = currentState || {};
   const itemsStr = (state.items || []).map((i) => `${i.name} at (${i.x}, ${i.y})`).join(', ') || 'None';
-  const participantsStr = (state.participants || []).map((p) => `${p.bitName} (ID: ${p.userId})`).join(', ') || 'None';
+  const participantsStr = (state.participants || []).map((p) => `${p.name} (ID: ${p.userId})`).join(', ') || 'None';
 
-  const systemPrompt = `You are a simulation assistant for the Doppelganger app. You help users set up and run simulated worlds where AI agents (called "Bits") interact with each other.
+  const systemPrompt = `You are a simulation assistant for the Doppelganger app. You help users set up and run simulated worlds where AI agents interact with each other.
 
 AVAILABLE USERS (you can add any of these as participants):
 ${usersStr}

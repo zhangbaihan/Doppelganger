@@ -16,8 +16,8 @@ export default apiHandler(async (req, res) => {
 
   if (name !== undefined) {
     updates.name = name;
-    // Also update bit_name to match first name
-    updates.bit_name = `${name.trim().split(/\s+/)[0]}'s Bit`;
+    // Also update bit_name to match real name
+    updates.bit_name = name.trim();
   }
 
   if (profileData !== undefined) {

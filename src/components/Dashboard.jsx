@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import SimulationWorkspace from './SimulationWorkspace';
 import PlaygroundViewer from './PlaygroundViewer';
 
-const PROMPTS = [
+/* ── Static fallback prompts (used when no confidence data exists yet) ── */
+const FALLBACK_PROMPTS = [
   "Describe yourself however you'd like!",
   'Walk me through a recent day that felt like a good day.',
   "What do you usually do when you enter a room where you don't know anyone?",
@@ -18,6 +19,34 @@ const PROMPTS = [
   "What's a small thing that reliably makes your day better?",
 ];
 
+/* ── Domain-keyed question pools (used when confidence data exists) ── */
+const DOMAIN_PROMPTS = {
+  identity_resolution: [
+    "What's a belief you hold that most people around you probably don't share?",
+    "Tell me about a time you surprised yourself — did something totally out of character.",
+    "If someone who barely knows you described you, what would they get wrong?",
+    "What's something you used to believe strongly but have completely changed your mind about?",
+  ],
+  behavioral_specificity: [
+    "Walk me through what you actually do when you wake up on a day with nothing planned.",
+    "Tell me about the last decision you agonised over — what was it and how did you land?",
+    "When you're stressed and nobody's watching, what do you actually do? Be honest.",
+    "Describe a recent situation where you had to improvise — what happened?",
+  ],
+  emotional_resolution: [
+    "What's something that makes you irrationally angry — like way more than it should?",
+    "Tell me about the last time you cried. What triggered it?",
+    "When you're really happy, how do people around you know? What does it look like?",
+    "What's an emotion you have trouble expressing, even to people close to you?",
+  ],
+  social_pattern_clarity: [
+    "Tell me about a real conflict you had with someone you care about — how did it play out?",
+    "When you're at a party, walk me through what you actually do for the first 30 minutes.",
+    "How do you act differently around your closest friend vs. a new acquaintance?",
+    "Tell me about a time a friendship or relationship ended. What happened from your side?",
+  ],
+};
+
 const SCORE_DOMAINS = [
   { key: 'identity_resolution', label: 'Identity Resolution' },
   { key: 'behavioral_specificity', label: 'Behavioral Specificity' },
@@ -32,8 +61,8 @@ const TABS = [
 ];
 
 const CHAT_MODES = [
-  { id: 'freestyle', label: 'CONVERSATION', desc: 'Chat with Bit — back and forth' },
-  { id: 'training', label: 'YAP SESH', desc: 'Talk about yourself — Bit takes notes' },
+  { id: 'freestyle', label: 'CONVERSATION', desc: 'Chat with your AI — back and forth' },
+  { id: 'training', label: 'YAP SESH', desc: 'Talk about yourself — your AI takes notes' },
 ];
 
 const PROFILE_FIELDS = [
@@ -106,7 +135,38 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
   const chunksRef = useRef([]);
   const chatEndRef = useRef(null);
 
-  /* ── Load chat history on mount and when chat mode changes ──── */
+  /* ── Dynamic conversation starter based on knowledge gaps ───── */
+
+  function pickConversationStarter() {
+    // If we have confidence data, target the weakest domain
+    if (confidenceScores && confidenceSuggestions) {
+      const domains = Object.entries(confidenceScores)
+        .map(([key, score]) => [key, score || 0])
+        .sort((a, b) => a[1] - b[1]);
+
+      if (domains.length > 0) {
+        // Try the suggestion from the weakest domain first
+        const weakestKey = domains[0][0];
+        const suggestion = confidenceSuggestions[weakestKey];
+
+        // If there's a domain-specific question pool, pick from it
+        const pool = DOMAIN_PROMPTS[weakestKey];
+        if (pool && pool.length > 0) {
+          return pool[Math.floor(Math.random() * pool.length)];
+        }
+
+        // Fall back to the raw suggestion text if available
+        if (suggestion) {
+          return suggestion;
+        }
+      }
+    }
+
+    // No confidence data yet — use generic fallback prompts
+    return FALLBACK_PROMPTS[Math.floor(Math.random() * FALLBACK_PROMPTS.length)];
+  }
+
+  /* ── Load chat history on mount and when chat mode changes ───── */
 
   useEffect(() => {
     loadHistory();
@@ -138,7 +198,7 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
         ]);
         setMessages(history);
         if (history.length === 0) {
-          setConversationStarterPrompt(PROMPTS[Math.floor(Math.random() * PROMPTS.length)]);
+          setConversationStarterPrompt(pickConversationStarter());
         } else {
           setConversationStarterPrompt(null);
         }
@@ -467,7 +527,7 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
         // Training mode: show confirmation so user knows input was processed
         setMessages((prev) => [
           ...prev,
-          { role: 'assistant', text: `Noted! ${user.bit_name}'s knowledge base has been updated.` },
+          { role: 'assistant', text: `Noted! ${user.name}'s knowledge base has been updated.` },
         ]);
         setConfidenceScores(data.confidenceScores || confidenceScores);
         setConfidenceReasoning(data.confidenceReasoning);
@@ -697,12 +757,12 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
         <button className="logout-btn" onClick={onLogout}>LOGOUT</button>
       </div>
 
-      {/* Bit character */}
+      {/* Agent character */}
       <div className="bit-section">
         <div className="bit-shape dashboard-bit trained">
           <div className="bit-inner" />
         </div>
-        <h2 className="bit-name">{user.bit_name}</h2>
+        <h2 className="bit-name">{user.name}</h2>
       </div>
 
       {/* Tab navigation */}
@@ -724,7 +784,7 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
           <div className="confidence-section">
             <h3 className="section-title">CONFIDENCE SCORES</h3>
             <p className="section-desc">
-              How well {user.bit_name} can predict you:
+              How well your AI can predict you:
             </p>
             <div className="scores-grid">
               {SCORE_DOMAINS.map(({ key, label }) => (
@@ -804,7 +864,7 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
               </button>
               {showPrompts && (
                 <ul className="prompts-list">
-                  {PROMPTS.map((p, i) => (
+                  {FALLBACK_PROMPTS.map((p, i) => (
                     <li key={i} className="prompt-item">
                       {p}
                     </li>
@@ -818,20 +878,20 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
             <div className="chat-messages">
               {chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt && (
                 <div className="chat-msg agent">
-                  <span className="msg-author">{user.bit_name?.toUpperCase()}</span>
+                  <span className="msg-author">{user.name?.toUpperCase()}</span>
                   <p className="msg-text">{conversationStarterPrompt}</p>
                 </div>
               )}
               {messages.length === 0 && !(chatMode === 'freestyle' && conversationStarterPrompt) && (
                 <div className="chat-empty">
                   {chatMode === 'freestyle'
-                    ? `Hit record and chat with ${user.bit_name}. You can talk about anything — ${user.bit_name} will reply.`
-                    : `Hit record and start talking to ${user.bit_name}.\nTalk about anything — your day, your habits, your opinions.\n${user.bit_name} is listening and taking notes.`}
+                    ? `Hit record and chat with your AI. You can talk about anything — your AI will reply.`
+                    : `Hit record and start talking to your AI.\nTalk about anything — your day, your habits, your opinions.\n Your AI will listen and learn to represent you.`}
                 </div>
               )}
               {messages.map((msg, i) => (
                 <div key={i} className={`chat-msg ${msg.role === 'assistant' ? 'agent' : 'user'}`}>
-                  <span className="msg-author">{msg.role === 'assistant' ? user.bit_name?.toUpperCase() : 'YOU'}</span>
+                  <span className="msg-author">{msg.role === 'assistant' ? user.name?.toUpperCase() : 'YOU'}</span>
                   <p className="msg-text">{msg.text}</p>
                 </div>
               ))}
