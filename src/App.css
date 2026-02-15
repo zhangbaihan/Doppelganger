@@ -1445,7 +1445,7 @@ body {
 .sim-workspace {
   display: grid;
   grid-template-columns: 220px 1fr 300px;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: 1fr;
   height: calc(100vh - 53px);
   overflow: hidden;
 }
