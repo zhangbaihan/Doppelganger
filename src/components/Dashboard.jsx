@@ -782,14 +782,42 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
                 <span className="processing-text">Processing...</span>
               </div>
             ) : (
-              <div className="record-controls-row">
-                <button
-                  className={`record-btn ${isRecording ? 'recording' : ''}`}
-                  onClick={isRecording ? stopRecording : startRecording}
-                >
-                  <div className="record-icon" />
-                  <span>{isRecording ? 'STOP' : 'RECORD'}</span>
-                </button>
+              <>
+                <div className="chat-input-row">
+                  <button
+                    className={`record-icon-btn ${isRecording ? 'recording' : ''}`}
+                    onClick={isRecording ? stopRecording : startRecording}
+                    title={isRecording ? 'Stop recording' : 'Record audio'}
+                  >
+                    {isRecording ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                    )}
+                  </button>
+                  <input
+                    type="text"
+                    className="chat-text-input"
+                    placeholder="Type a message..."
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendText();
+                      }
+                    }}
+                    disabled={isProcessing}
+                  />
+                  <button
+                    type="button"
+                    className="chat-send-btn"
+                    onClick={handleSendText}
+                    disabled={isProcessing || !inputText.trim()}
+                  >
+                    SEND
+                  </button>
+                </div>
                 <button
                   type="button"
                   className="clear-save-btn"
@@ -799,32 +827,8 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
                 >
                   CLEAR & SAVE
                 </button>
-              </div>
+              </>
             )}
-            <div className="chat-input-row">
-              <input
-                type="text"
-                className="chat-text-input"
-                placeholder="Or type a message..."
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendText();
-                  }
-                }}
-                disabled={isProcessing}
-              />
-              <button
-                type="button"
-                className="chat-send-btn"
-                onClick={handleSendText}
-                disabled={isProcessing || !inputText.trim()}
-              >
-                SEND
-              </button>
-            </div>
           </div>
         </>
       )}

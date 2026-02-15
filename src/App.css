@@ -698,17 +698,10 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
-  padding: 24px 20px 44px;
+  gap: 10px;
+  padding: 18px 20px 36px;
   background: linear-gradient(transparent, var(--bg) 40%);
   pointer-events: none;
-}
-
-.record-controls-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  pointer-events: auto;
 }
 
 .record-section > * {
@@ -720,7 +713,7 @@ body {
   align-items: center;
   gap: 10px;
   width: 100%;
-  max-width: 420px;
+  max-width: 480px;
 }
 
 .chat-text-input {
@@ -795,37 +788,36 @@ body {
   cursor: not-allowed;
 }
 
-.record-btn {
+.record-icon-btn {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px 36px;
+  justify-content: center;
   background: var(--surface);
   border: 2px solid var(--primary);
-  border-radius: 50px;
+  border-radius: 50%;
   color: var(--primary);
-  font-family: var(--font-pixel);
-  font-size: 10px;
   cursor: pointer;
-  letter-spacing: 2px;
   transition: all 0.2s;
 }
 
-.record-btn:hover {
+.record-icon-btn:hover {
   background: rgba(0, 229, 255, 0.08);
-  transform: translateY(-1px);
 }
 
-.record-btn.recording {
+.record-icon-btn.recording {
   border-color: var(--accent);
   color: var(--accent);
   animation: recording-pulse 1.5s ease-in-out infinite;
 }
 
-.record-btn.recording:hover {
+.record-icon-btn.recording:hover {
   background: rgba(255, 96, 144, 0.08);
 }
 
+/* legacy – keep for compat */
 .record-icon {
   width: 14px;
   height: 14px;
