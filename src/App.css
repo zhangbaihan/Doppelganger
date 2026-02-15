@@ -559,6 +559,51 @@ body {
   color: var(--primary-dim);
 }
 
+/* ── Chat mode toggle (Freestyle vs Training) ────────────────────── */
+
+.chat-mode-toggle {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.chat-mode-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 2px solid var(--surface-light);
+  border-radius: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+.chat-mode-btn:hover {
+  border-color: rgba(0, 229, 255, 0.3);
+  color: var(--text);
+}
+
+.chat-mode-btn.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(0, 229, 255, 0.06);
+}
+
+.chat-mode-label {
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+
+.chat-mode-desc {
+  font-size: 11px;
+  opacity: 0.9;
+}
+
 /* ── Chat section ────────────────────────────────────────────────── */
 
 .chat-section {
@@ -651,7 +696,9 @@ body {
   left: 0;
   right: 0;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
   padding: 24px 20px 32px;
   background: linear-gradient(transparent, var(--bg) 40%);
   pointer-events: none;
@@ -659,6 +706,63 @@ body {
 
 .record-section > * {
   pointer-events: auto;
+}
+
+.chat-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.chat-text-input {
+  flex: 1;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 2px solid var(--surface-light);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+
+.chat-text-input::placeholder {
+  color: var(--text-dim);
+}
+
+.chat-text-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.chat-text-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.chat-send-btn {
+  padding: 12px 20px;
+  background: var(--surface);
+  border: 2px solid var(--primary);
+  border-radius: 10px;
+  color: var(--primary);
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.chat-send-btn:hover:not(:disabled) {
+  background: rgba(0, 229, 255, 0.08);
+}
+
+.chat-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .record-btn {
@@ -821,6 +925,35 @@ body {
   color: var(--text);
   line-height: 1.65;
   word-break: break-word;
+}
+
+.training-data-item.transcript-freestyle .training-data-text {
+  margin-bottom: 8px;
+}
+
+.training-data-item.transcript-freestyle .training-data-text:last-child {
+  margin-bottom: 0;
+}
+
+.training-data-user {
+  font-weight: 500;
+}
+
+.training-data-agent {
+  padding-left: 12px;
+  border-left: 2px solid var(--primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.raw-transcript-sub-nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.raw-transcript-sub-nav .data-sub-btn {
+  flex: 0 1 auto;
 }
 
 /* ── Profile section ─────────────────────────────────────────────── */

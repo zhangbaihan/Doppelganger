@@ -94,6 +94,7 @@ export async function initDb() {
     `ALTER TABLE users ADD COLUMN profile_data TEXT DEFAULT NULL`,
     `ALTER TABLE users ADD COLUMN confidence_reasoning TEXT DEFAULT NULL`,
     `ALTER TABLE users ADD COLUMN knowledge_base TEXT DEFAULT NULL`,
+    `ALTER TABLE conversations ADD COLUMN conversation_type TEXT DEFAULT 'training'`,
   ];
   for (const sql of migrations) {
     try { await db.execute(sql); } catch { /* already exists */ }
@@ -147,8 +148,16 @@ export async function updateUser(id, data) {
   });
 }
 
-export async function getConversations(userId, limit = 50) {
+/** @param {'freestyle'|'training'|null} type - if set, filter by conversation type */
+export async function getConversations(userId, limit = 50, type = null) {
   const db = await initDb();
+  if (type) {
+    const result = await db.execute({
+      sql: 'SELECT * FROM conversations WHERE user_id = ? AND conversation_type = ? ORDER BY created_at ASC LIMIT ?',
+      args: [userId, type, limit],
+    });
+    return result.rows;
+  }
   const result = await db.execute({
     sql: 'SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at ASC LIMIT ?',
     args: [userId, limit],
@@ -156,11 +165,11 @@ export async function getConversations(userId, limit = 50) {
   return result.rows;
 }
 
-export async function addConversation(userId, userMessage, agentResponse) {
+export async function addConversation(userId, userMessage, agentResponse, conversationType = 'training') {
   const db = await initDb();
   await db.execute({
-    sql: 'INSERT INTO conversations (user_id, user_message, agent_response) VALUES (?, ?, ?)',
-    args: [userId, userMessage, agentResponse],
+    sql: 'INSERT INTO conversations (user_id, user_message, agent_response, conversation_type) VALUES (?, ?, ?, ?)',
+    args: [userId, userMessage, agentResponse, conversationType],
   });
 }
 

@@ -163,6 +163,38 @@ RULES FOR confidence_suggestions:
 - Give ONE specific, actionable thing the user could talk about to increase each score. Be concrete, not generic.`;
 }
 
+/* ── Freestyle: conversational Bit (no KB update) ─────────────────── */
+
+function buildFreestyleSystemPrompt(user, knowledgeBase) {
+  const profileData = JSON.parse(user.profile_data || '{}');
+  const profileStr = [
+    `Name: ${user.name}`,
+    profileData.age ? `Age: ${profileData.age}` : '',
+    profileData.gender_identity ? `Gender identity: ${profileData.gender_identity}` : '',
+    profileData.race ? `Race: ${profileData.race}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const kbStr = JSON.stringify(knowledgeBase, null, 2);
+
+  return `You are ${user.bit_name}, an AI doppelganger of ${user.name}. You are having a natural, freestyle conversation with ${user.name} (the user).
+
+WHAT YOU KNOW ABOUT ${user.name.toUpperCase()} (use this to sound like them / relate to them; do not recite it):
+Profile: ${profileStr}
+
+Structured knowledge about ${user.name}:
+${kbStr}
+
+INSTRUCTIONS:
+- Respond as ${user.bit_name}: warm, conversational, and in character.
+- Acknowledge what ${user.name} said, then ask a provocative or deepening question when appropriate — dig a little deeper rather than moving on.
+- You can share reactions, joke, or go deeper on topics they bring up.
+- Keep replies concise (a few sentences) unless they ask for more.
+- Do NOT update any knowledge base or take notes — this is just chat.
+- Speak in first person as ${user.bit_name}.`;
+}
+
 /* ── Handler ─────────────────────────────────────────────────────── */
 
 export default apiHandler(async (req, res) => {
@@ -176,29 +208,97 @@ export default apiHandler(async (req, res) => {
   const user = await getUserById(decoded.userId);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  const { audio } = req.body;
-  if (!audio) return res.status(400).json({ error: 'No audio data' });
+  const { audio, text: textInput, type: conversationType, initialPrompt } = req.body;
+  const mode = conversationType === 'freestyle' ? 'freestyle' : 'training';
 
-  // Decode base64 → buffer → file for Whisper
-  const buffer = Buffer.from(audio, 'base64');
-  const file = await toFile(buffer, 'audio.webm', { type: 'audio/webm' });
-
-  const transcription = await openai.audio.transcriptions.create({
-    model: 'whisper-1',
-    file,
-  });
-
-  const userMessage = transcription.text;
-  if (!userMessage || !userMessage.trim()) {
-    return res
-      .status(400)
-      .json({ error: 'Could not transcribe audio. Try speaking more clearly.' });
+  let userMessage;
+  if (textInput != null && String(textInput).trim()) {
+    userMessage = String(textInput).trim();
+  } else if (audio) {
+    const buffer = Buffer.from(audio, 'base64');
+    const file = await toFile(buffer, 'audio.webm', { type: 'audio/webm' });
+    const transcription = await openai.audio.transcriptions.create({
+      model: 'whisper-1',
+      file,
+    });
+    userMessage = transcription.text;
+    if (!userMessage || !userMessage.trim()) {
+      return res
+        .status(400)
+        .json({ error: 'Could not transcribe audio. Try speaking more clearly.' });
+    }
+  } else {
+    return res.status(400).json({ error: 'Provide either text or audio.' });
   }
 
-  // Current knowledge base (or empty scaffold)
-  const knowledgeBase = JSON.parse(user.knowledge_base || 'null') || EMPTY_KB;
+  if (mode === 'freestyle') {
+    const knowledgeBase = JSON.parse(user.knowledge_base || 'null') || EMPTY_KB;
+    const systemPrompt = buildFreestyleSystemPrompt(user, knowledgeBase);
+    const recentFreestyle = await getConversations(Number(user.id), 20, 'freestyle');
+    const historyMessages = recentFreestyle.flatMap((c) => [
+      ...(c.user_message ? [{ role: 'user', content: c.user_message }] : []),
+      ...(c.agent_response ? [{ role: 'assistant', content: c.agent_response }] : []),
+    ]);
+    // If this turn was started by Bit (initialPrompt), store that row and include in context
+    if (initialPrompt && typeof initialPrompt === 'string' && initialPrompt.trim()) {
+      await addConversation(Number(user.id), '', initialPrompt.trim(), 'freestyle');
+      historyMessages.push({ role: 'assistant', content: initialPrompt.trim() });
+    }
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...historyMessages,
+      { role: 'user', content: userMessage },
+    ];
 
-  // Build prompt & call GPT-4o
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages,
+      temperature: 0.8,
+    });
+
+    const agentResponse = (completion.choices[0].message.content || '').trim();
+
+    // Run training processor on user message so freestyle also updates KB and confidence (same as training mode)
+    const trainingSystemPrompt = buildSystemPrompt(user, knowledgeBase);
+    const trainingCompletion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: trainingSystemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      temperature: 0.7,
+    });
+    const trainingResult = JSON.parse(trainingCompletion.choices[0].message.content);
+    const newKnowledgeBase = trainingResult.knowledge_base || knowledgeBase;
+    const newConfidenceScores = trainingResult.confidence_scores || {};
+    const newConfidenceReasoning = trainingResult.confidence_reasoning || null;
+    const newConfidenceSuggestions = trainingResult.confidence_suggestions || null;
+
+    await updateUser(Number(user.id), {
+      knowledge_base: JSON.stringify(newKnowledgeBase),
+      confidence_scores: JSON.stringify(newConfidenceScores),
+      confidence_reasoning: JSON.stringify({
+        reasoning: newConfidenceReasoning,
+        suggestions: newConfidenceSuggestions,
+      }),
+    });
+
+    await addConversation(Number(user.id), userMessage, agentResponse, 'freestyle');
+
+    return res.json({
+      userMessage,
+      agentResponse,
+      type: 'freestyle',
+      confidenceScores: newConfidenceScores,
+      confidenceReasoning: newConfidenceReasoning,
+      confidenceSuggestions: newConfidenceSuggestions,
+      knowledgeBase: newKnowledgeBase,
+    });
+  }
+
+  // ─── Training mode: silent processor, KB update ─────────────────
+  const knowledgeBase = JSON.parse(user.knowledge_base || 'null') || EMPTY_KB;
   const systemPrompt = buildSystemPrompt(user, knowledgeBase);
 
   const completion = await openai.chat.completions.create({
@@ -227,12 +327,12 @@ export default apiHandler(async (req, res) => {
     }),
   });
 
-  // Store raw transcription for Training Data view
-  await addConversation(Number(user.id), userMessage, '');
+  await addConversation(Number(user.id), userMessage, '', 'training');
 
   res.json({
     userMessage,
     agentResponse: '',
+    type: 'training',
     confidenceScores: newConfidenceScores,
     confidenceReasoning: newConfidenceReasoning,
     confidenceSuggestions: newConfidenceSuggestions,

@@ -31,6 +31,11 @@ const TABS = [
   { id: 'sim', label: 'SIMULATION' },
 ];
 
+const CHAT_MODES = [
+  { id: 'freestyle', label: 'CONVERSATION', desc: 'Chat with Bit — back and forth' },
+  { id: 'training', label: 'YAP SESH', desc: 'Talk about yourself — Bit takes notes' },
+];
+
 const PROFILE_FIELDS = [
   { key: 'age', label: 'AGE' },
   { key: 'height', label: 'HEIGHT' },
@@ -41,10 +46,13 @@ const PROFILE_FIELDS = [
 
 export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
   const [tab, setTab] = useState('train');
+  const [chatMode, setChatMode] = useState('training'); // 'freestyle' | 'training'
   const [messages, setMessages] = useState([]);
   const [allTrainingData, setAllTrainingData] = useState([]);
+  const [allFreestyleData, setAllFreestyleData] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [inputText, setInputText] = useState('');
   const [error, setError] = useState(null);
   const [showPrompts, setShowPrompts] = useState(false);
   const [expandedScore, setExpandedScore] = useState(null);
@@ -66,6 +74,8 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
     user.knowledge_base || null
   );
   const [dataView, setDataView] = useState('kb');
+  const [rawTranscriptType, setRawTranscriptType] = useState('training'); // 'freestyle' | 'training'
+  const [conversationStarterPrompt, setConversationStarterPrompt] = useState(null); // Bit's first message when conversation is empty
 
   // Editing states
   const [editingProfile, setEditingProfile] = useState(false);
@@ -89,15 +99,15 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
   const chunksRef = useRef([]);
   const chatEndRef = useRef(null);
 
-  /* ── Load chat history on mount ──────────────────────────────── */
+  /* ── Load chat history on mount and when chat mode changes ──── */
 
   useEffect(() => {
     loadHistory();
-  }, []);
+  }, [chatMode]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, conversationStarterPrompt]);
 
   useEffect(() => {
     if (error) {
@@ -108,17 +118,31 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
 
   async function loadHistory() {
     try {
-      const res = await fetch('/api/chat/history', {
+      const type = chatMode === 'freestyle' ? 'freestyle' : 'training';
+      const res = await fetch(`/api/chat/history?type=${type}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
       const data = await res.json();
-      const history = data.conversations.map((c) => ({
-        role: 'user',
-        text: c.user_message,
-      }));
-      setMessages(history);
-      setAllTrainingData(data.conversations);
+      if (chatMode === 'freestyle') {
+        const history = data.conversations.flatMap((c) => [
+          ...(c.user_message ? [{ role: 'user', text: c.user_message }] : []),
+          ...(c.agent_response ? [{ role: 'assistant', text: c.agent_response }] : []),
+        ]);
+        setMessages(history);
+        if (history.length === 0) {
+          setConversationStarterPrompt(PROMPTS[Math.floor(Math.random() * PROMPTS.length)]);
+        } else {
+          setConversationStarterPrompt(null);
+        }
+      } else {
+        setMessages(
+          data.conversations.map((c) => ({ role: 'user', text: c.user_message }))
+        );
+      }
+      if (chatMode === 'training') {
+        setAllTrainingData(data.conversations);
+      }
     } catch (err) {
       console.error('Failed to load history:', err);
     }
@@ -257,6 +281,34 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
     if (tab === 'sim') loadSimulations();
   }, [tab]);
 
+  // Load both transcript types when on Data tab (for Raw Transcripts sub-views)
+  async function loadDataTabTranscripts() {
+    try {
+      const [trainRes, freeRes] = await Promise.all([
+        fetch('/api/chat/history?type=training', {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch('/api/chat/history?type=freestyle', {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+      if (trainRes.ok) {
+        const data = await trainRes.json();
+        setAllTrainingData(data.conversations || []);
+      }
+      if (freeRes.ok) {
+        const data = await freeRes.json();
+        setAllFreestyleData(data.conversations || []);
+      }
+    } catch (err) {
+      console.error('Failed to load transcripts:', err);
+    }
+  }
+
+  useEffect(() => {
+    if (tab === 'data') loadDataTabTranscripts();
+  }, [tab]);
+
   /* ── Recording ───────────────────────────────────────────────── */
 
   async function startRecording() {
@@ -310,19 +362,17 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
     });
   }
 
-  async function sendAudio(blob) {
+  async function sendMessage(body) {
     setIsProcessing(true);
     setError(null);
     try {
-      const base64 = await blobToBase64(blob);
-
       const res = await fetch('/api/chat/message', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ audio: base64 }),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -332,26 +382,58 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
 
       const data = await res.json();
 
-      setMessages((prev) => [...prev, { role: 'user', text: data.userMessage }]);
-      setConfidenceScores(data.confidenceScores);
-      setConfidenceReasoning(data.confidenceReasoning);
-      setConfidenceSuggestions(data.confidenceSuggestions);
-      if (data.knowledgeBase) setKnowledgeBase(data.knowledgeBase);
-
-      setAllTrainingData((prev) => [
-        ...prev,
-        {
-          user_message: data.userMessage,
-          agent_response: '',
-          created_at: new Date().toISOString(),
-        },
-      ]);
+      if (data.type === 'freestyle') {
+        setConversationStarterPrompt(null);
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', text: data.userMessage },
+          { role: 'assistant', text: data.agentResponse || '' },
+        ]);
+        if (data.confidenceScores) setConfidenceScores(data.confidenceScores);
+        if (data.confidenceReasoning) setConfidenceReasoning(data.confidenceReasoning);
+        if (data.confidenceSuggestions) setConfidenceSuggestions(data.confidenceSuggestions);
+        if (data.knowledgeBase) setKnowledgeBase(data.knowledgeBase);
+      } else {
+        setMessages((prev) => [...prev, { role: 'user', text: data.userMessage }]);
+        setConfidenceScores(data.confidenceScores || confidenceScores);
+        setConfidenceReasoning(data.confidenceReasoning);
+        setConfidenceSuggestions(data.confidenceSuggestions);
+        if (data.knowledgeBase) setKnowledgeBase(data.knowledgeBase);
+        setAllTrainingData((prev) => [
+          ...prev,
+          {
+            user_message: data.userMessage,
+            agent_response: '',
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
     } catch (err) {
       console.error('Send error:', err);
       setError(err.message || 'Something went wrong');
     } finally {
       setIsProcessing(false);
     }
+  }
+
+  async function sendAudio(blob) {
+    const base64 = await blobToBase64(blob);
+    const body = { audio: base64, type: chatMode };
+    if (chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt) {
+      body.initialPrompt = conversationStarterPrompt;
+    }
+    await sendMessage(body);
+  }
+
+  function handleSendText() {
+    const trimmed = inputText.trim();
+    if (!trimmed || isProcessing) return;
+    setInputText('');
+    const body = { text: trimmed, type: chatMode };
+    if (chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt) {
+      body.initialPrompt = conversationStarterPrompt;
+    }
+    sendMessage(body);
   }
 
   /* ── KB item renderer ────────────────────────────────────────── */
@@ -573,42 +655,62 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
             </div>
           </div>
 
-          <div className="prompts-section">
-            <button
-              className="prompts-toggle"
-              onClick={() => setShowPrompts((p) => !p)}
-            >
-              <span className="section-title" style={{ margin: 0 }}>
-                CONVERSATION STARTERS
-              </span>
-              <span className="prompts-arrow">
-                {showPrompts ? '\u25B2' : '\u25BC'}
-              </span>
-            </button>
-            {showPrompts && (
-              <ul className="prompts-list">
-                {PROMPTS.map((p, i) => (
-                  <li key={i} className="prompt-item">
-                    {p}
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className="chat-mode-toggle">
+            {CHAT_MODES.map(({ id, label, desc }) => (
+              <button
+                key={id}
+                className={`chat-mode-btn ${chatMode === id ? 'active' : ''}`}
+                onClick={() => setChatMode(id)}
+              >
+                <span className="chat-mode-label">{label}</span>
+                <span className="chat-mode-desc">{desc}</span>
+              </button>
+            ))}
           </div>
+
+          {chatMode === 'training' && (
+            <div className="prompts-section">
+              <button
+                className="prompts-toggle"
+                onClick={() => setShowPrompts((p) => !p)}
+              >
+                <span className="section-title" style={{ margin: 0 }}>
+                  CONVERSATION STARTERS
+                </span>
+                <span className="prompts-arrow">
+                  {showPrompts ? '\u25B2' : '\u25BC'}
+                </span>
+              </button>
+              {showPrompts && (
+                <ul className="prompts-list">
+                  {PROMPTS.map((p, i) => (
+                    <li key={i} className="prompt-item">
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           <div className="chat-section">
             <div className="chat-messages">
-              {messages.length === 0 && (
+              {chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt && (
+                <div className="chat-msg agent">
+                  <span className="msg-author">{user.bit_name?.toUpperCase()}</span>
+                  <p className="msg-text">{conversationStarterPrompt}</p>
+                </div>
+              )}
+              {messages.length === 0 && !(chatMode === 'freestyle' && conversationStarterPrompt) && (
                 <div className="chat-empty">
-                  Hit record and start talking to {user.bit_name}.
-                  {'\n'}Talk about anything — your day, your habits, your opinions.
-                  {'\n'}
-                  {user.bit_name} is listening.
+                  {chatMode === 'freestyle'
+                    ? `Hit record and chat with ${user.bit_name}. You can talk about anything — ${user.bit_name} will reply.`
+                    : `Hit record and start talking to ${user.bit_name}.\nTalk about anything — your day, your habits, your opinions.\n${user.bit_name} is listening and taking notes.`}
                 </div>
               )}
               {messages.map((msg, i) => (
-                <div key={i} className="chat-msg user">
-                  <span className="msg-author">YOU</span>
+                <div key={i} className={`chat-msg ${msg.role === 'assistant' ? 'agent' : 'user'}`}>
+                  <span className="msg-author">{msg.role === 'assistant' ? user.bit_name?.toUpperCase() : 'YOU'}</span>
                   <p className="msg-text">{msg.text}</p>
                 </div>
               ))}
@@ -635,6 +737,30 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
                 <span>{isRecording ? 'STOP' : 'RECORD'}</span>
               </button>
             )}
+            <div className="chat-input-row">
+              <input
+                type="text"
+                className="chat-text-input"
+                placeholder="Or type a message..."
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendText();
+                  }
+                }}
+                disabled={isProcessing}
+              />
+              <button
+                type="button"
+                className="chat-send-btn"
+                onClick={handleSendText}
+                disabled={isProcessing || !inputText.trim()}
+              >
+                SEND
+              </button>
+            </div>
           </div>
         </>
       )}
@@ -854,35 +980,86 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
             </div>
           )}
 
-          {/* Raw Transcripts (read-only) */}
+          {/* Raw Transcripts: Conversation and Training sub-tabs */}
           {dataView === 'raw' && (
             <div className="training-data-section">
-              <p className="section-desc">
-                {allTrainingData.length === 0
-                  ? 'No training data yet. Record your first session!'
-                  : `${allTrainingData.length} training session${allTrainingData.length !== 1 ? 's' : ''} stored`}
-              </p>
-              <div className="training-data-list">
-                {allTrainingData.map((entry, i) => (
-                  <div key={i} className="training-data-item">
-                    <div className="training-data-meta">
-                      <span className="training-data-num">#{i + 1}</span>
-                      <span className="training-data-time">
-                        {new Date(entry.created_at).toLocaleDateString(
-                          undefined,
-                          {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          }
-                        )}
-                      </span>
-                    </div>
-                    <p className="training-data-text">{entry.user_message}</p>
-                  </div>
-                ))}
+              <div className="raw-transcript-sub-nav">
+                <button
+                  className={`data-sub-btn ${rawTranscriptType === 'freestyle' ? 'active' : ''}`}
+                  onClick={() => setRawTranscriptType('freestyle')}
+                >
+                  CONVERSATION
+                </button>
+                <button
+                  className={`data-sub-btn ${rawTranscriptType === 'training' ? 'active' : ''}`}
+                  onClick={() => setRawTranscriptType('training')}
+                >
+                  TRAINING
+                </button>
               </div>
+              {rawTranscriptType === 'freestyle' && (
+                <>
+                  <p className="section-desc">
+                    {allFreestyleData.length === 0
+                      ? 'No conversations yet.'
+                      : `${allFreestyleData.length} conversation${allFreestyleData.length !== 1 ? 's' : ''}`}
+                  </p>
+                  <div className="training-data-list">
+                    {allFreestyleData.map((entry, i) => (
+                      <div key={i} className="training-data-item transcript-freestyle">
+                        <div className="training-data-meta">
+                          <span className="training-data-num">#{i + 1}</span>
+                          <span className="training-data-time">
+                            {new Date(entry.created_at).toLocaleDateString(
+                              undefined,
+                              {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              }
+                            )}
+                          </span>
+                        </div>
+                        <p className="training-data-text training-data-user">{entry.user_message}</p>
+                        {entry.agent_response && (
+                          <p className="training-data-text training-data-agent">{entry.agent_response}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              {rawTranscriptType === 'training' && (
+                <>
+                  <p className="section-desc">
+                    {allTrainingData.length === 0
+                      ? 'No training data yet. Record your first session!'
+                      : `${allTrainingData.length} training session${allTrainingData.length !== 1 ? 's' : ''} stored`}
+                  </p>
+                  <div className="training-data-list">
+                    {allTrainingData.map((entry, i) => (
+                      <div key={i} className="training-data-item">
+                        <div className="training-data-meta">
+                          <span className="training-data-num">#{i + 1}</span>
+                          <span className="training-data-time">
+                            {new Date(entry.created_at).toLocaleDateString(
+                              undefined,
+                              {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              }
+                            )}
+                          </span>
+                        </div>
+                        <p className="training-data-text">{entry.user_message}</p>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </>

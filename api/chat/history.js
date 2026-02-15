@@ -10,6 +10,11 @@ export default apiHandler(async (req, res) => {
   const decoded = verifyToken(req.headers.authorization);
   if (!decoded) return res.status(401).json({ error: 'Unauthorized' });
 
-  const conversations = await getConversations(decoded.userId);
+  const type = req.query.type; // 'freestyle' | 'training' | undefined (all)
+  const conversations = await getConversations(
+    decoded.userId,
+    50,
+    type === 'freestyle' || type === 'training' ? type : null
+  );
   res.json({ conversations });
 });
