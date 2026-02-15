@@ -527,13 +527,65 @@ export default function SimulationWorkspace({ token, user }) {
     setSimMode(localSimMode);
   }
 
+  /* ── Auto-generate items via LLM ──────────────────────────── */
+
+  async function generateItems(currentGoal) {
+    try {
+      setChatMessages((prev) => [
+        ...prev,
+        { role: 'assistant', text: 'Setting up the scene...' },
+      ]);
+      const res = await fetch('/api/simulations/assist', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          message: `The user wants to start a simulation with the goal: "${currentGoal}". There are no items in the world yet. Generate 4-6 appropriate items/furniture to create an atmosphere for this scenario. Only add items, nothing else.`,
+          currentState: { items: [], participants, goal: currentGoal, simMode },
+          chatHistory: [],
+        }),
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      if (data.toolCalls && data.toolCalls.length > 0) {
+        let newItems = [];
+        for (const call of data.toolCalls) {
+          if (call.name === 'add_item' && call.args) {
+            newItems.push({
+              id: Date.now() + Math.random(),
+              name: call.args.name,
+              x: call.args.x || 300,
+              y: call.args.y || 200,
+            });
+          }
+        }
+        newItems = resolveItemLayout(newItems);
+        return newItems;
+      }
+    } catch (err) {
+      console.error('Auto-generate items error:', err);
+    }
+    return [];
+  }
+
   /* ── Simulation execution ──────────────────────────────────── */
 
   async function startSimulation(withAllUsers, simItems, simParticipants, simGoal) {
-    const currentItems = simItems || items;
+    let currentItems = simItems || items;
     const currentParticipants = simParticipants || participants;
     const currentGoal = simGoal || goal;
     const currentUserId = user.id;
+
+    // Auto-generate items if none exist
+    if (currentItems.length === 0 && currentGoal) {
+      const generated = await generateItems(currentGoal);
+      if (generated.length > 0) {
+        currentItems = generated;
+        setItems(generated);
+      }
+    }
 
     setPhase('running');
     setLiveMessages([]);
@@ -1017,38 +1069,47 @@ export default function SimulationWorkspace({ token, user }) {
 
       {/* ═══ CENTER PANEL ═══ */}
       <div className="sim-center-panel">
-        {/* Chat input at the top */}
-        {phase === 'setup' && (
-          <div className="sim-chat-bar sim-chat-bar-top">
-            <input
-              className="sim-chat-input"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Describe your simulation scenario..."
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleChatSubmit(chatInput);
-                }
-              }}
-              disabled={assistLoading}
-            />
-            <button
-              className={`sim-voice-btn ${isRecording ? 'recording' : ''}`}
-              onClick={isRecording ? stopRecording : startRecording}
-              disabled={assistLoading}
-            >
-              <div className="sim-voice-icon" />
-            </button>
-            <button
-              className="sim-send-btn"
-              onClick={() => handleChatSubmit(chatInput)}
-              disabled={!chatInput.trim() || assistLoading}
-            >
-              SEND
-            </button>
-          </div>
-        )}
+        {/* Chat input at the top — always visible */}
+        <div className="sim-chat-bar sim-chat-bar-top">
+          {phase === 'running' && (
+            <div className="sim-progress-bar">
+              <div className="sim-progress-fill" style={{ width: `${(turnCount / MAX_TURNS) * 100}%` }} />
+            </div>
+          )}
+          <input
+            className="sim-chat-input"
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            placeholder={
+              phase === 'setup'
+                ? 'Describe your simulation scenario...'
+                : phase === 'running'
+                  ? 'Simulation in progress...'
+                  : 'Start a new simulation...'
+            }
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleChatSubmit(chatInput);
+              }
+            }}
+            disabled={assistLoading || phase === 'running'}
+          />
+          <button
+            className={`sim-voice-btn ${isRecording ? 'recording' : ''}`}
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={assistLoading || phase === 'running'}
+          >
+            <div className="sim-voice-icon" />
+          </button>
+          <button
+            className="sim-send-btn"
+            onClick={() => handleChatSubmit(chatInput)}
+            disabled={!chatInput.trim() || assistLoading || phase === 'running'}
+          >
+            SEND
+          </button>
+        </div>
 
         {pairingInfo && <div className="sim-pairing-info">{pairingInfo}</div>}
 
@@ -1133,17 +1194,8 @@ export default function SimulationWorkspace({ token, user }) {
                 ]);
                 return;
               }
-              const useAll = simMode === 'all';
-              if (!useAll && participants.length < 1) {
-                setChatMessages((prev) => [
-                  ...prev,
-                  {
-                    role: 'assistant',
-                    text: 'Add some participants first! Drag agents from the left panel into the world, or ask me to set it up.',
-                  },
-                ]);
-                return;
-              }
+              // Default: use placed participants if any, otherwise simulate with all users
+              const useAll = participants.length === 0 || simMode === 'all';
               startSimulation(useAll, items, participants, goal);
             }}
           >
@@ -1159,7 +1211,7 @@ export default function SimulationWorkspace({ token, user }) {
             {phase === 'setup'
               ? 'ASSISTANT'
               : phase === 'running'
-                ? `LIVE CONVERSATION \u2014 TURN ${turnCount}/${MAX_TURNS}`
+                ? `TURN ${turnCount}/${MAX_TURNS}`
                 : 'CONVERSATION LOG'}
           </h3>
           {phase === 'running' && (
@@ -1254,47 +1306,6 @@ export default function SimulationWorkspace({ token, user }) {
         )}
       </div>
 
-      {/* ═══ CHAT BAR (non-setup phases) ═══ */}
-      {phase !== 'setup' && (
-        <div className="sim-chat-bar">
-          {phase === 'running' && (
-            <div className="sim-progress-bar">
-              <div className="sim-progress-fill" style={{ width: `${(turnCount / MAX_TURNS) * 100}%` }} />
-            </div>
-          )}
-          <input
-            className="sim-chat-input"
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            placeholder={
-              phase === 'running'
-                ? 'Simulation in progress...'
-                : 'Start a new simulation...'
-            }
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleChatSubmit(chatInput);
-              }
-            }}
-            disabled={assistLoading || phase === 'running'}
-          />
-          <button
-            className={`sim-voice-btn ${isRecording ? 'recording' : ''}`}
-            onClick={isRecording ? stopRecording : startRecording}
-            disabled={assistLoading || phase === 'running'}
-          >
-            <div className="sim-voice-icon" />
-          </button>
-          <button
-            className="sim-send-btn"
-            onClick={() => handleChatSubmit(chatInput)}
-            disabled={!chatInput.trim() || assistLoading || phase === 'running'}
-          >
-            SEND
-          </button>
-        </div>
-      )}
     </div>
   );
 }
