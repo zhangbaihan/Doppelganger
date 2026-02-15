@@ -700,6 +700,28 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 12px;
+}
+
+.add-item-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.item-name-input {
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--surface-light);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  width: 150px;
+}
+
+.item-name-input:focus {
+  border-color: var(--primary);
 }
 
 .config-label {
@@ -837,6 +859,28 @@ body {
 
 .participant-select:focus {
   border-color: var(--primary);
+}
+
+.participant-remove {
+  background: rgba(255, 96, 144, 0.15);
+  border: 1px solid rgba(255, 96, 144, 0.3);
+  border-radius: 50%;
+  color: var(--accent);
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.participant-remove:hover {
+  background: rgba(255, 96, 144, 0.25);
+  transform: scale(1.1);
 }
 
 .config-submit-btn {
@@ -1156,6 +1200,7 @@ body {
   padding: 20px;
   cursor: pointer;
   transition: all 0.2s;
+  position: relative;
 }
 
 .simulation-card:hover {
@@ -1163,12 +1208,44 @@ body {
   transform: translateY(-2px);
 }
 
+.sim-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
 .simulation-card h4 {
   font-family: var(--font-pixel);
   font-size: 12px;
   color: var(--primary);
   letter-spacing: 2px;
-  margin-bottom: 12px;
+  margin: 0;
+  flex: 1;
+}
+
+.sim-delete-btn {
+  background: rgba(255, 96, 144, 0.15);
+  border: 1px solid rgba(255, 96, 144, 0.3);
+  border-radius: 50%;
+  color: var(--accent);
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  opacity: 0.7;
+}
+
+.sim-delete-btn:hover {
+  background: rgba(255, 96, 144, 0.25);
+  opacity: 1;
+  transform: scale(1.1);
 }
 
 .sim-status {

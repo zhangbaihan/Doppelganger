@@ -25,6 +25,7 @@ import {
   addSimulationParticipant,
   getSimulationParticipants,
   getAllUsers,
+  deleteSimulation,
 } from './db.js';
 import { runSimulation } from './simulationEngine.js';
 
@@ -450,6 +451,22 @@ app.get('/api/simulations/available-users', authenticate, (req, res) => {
   } catch (error) {
     console.error('Get available users error:', error);
     res.status(500).json({ error: 'Failed to get available users' });
+  }
+});
+
+// Delete simulation
+app.delete('/api/simulations/:id', authenticate, (req, res) => {
+  try {
+    const simulation = getSimulation(parseInt(req.params.id));
+    if (!simulation || simulation.user_id !== req.userId) {
+      return res.status(404).json({ error: 'Simulation not found' });
+    }
+
+    deleteSimulation(simulation.id);
+    res.json({ message: 'Simulation deleted successfully' });
+  } catch (error) {
+    console.error('Delete simulation error:', error);
+    res.status(500).json({ error: 'Failed to delete simulation' });
   }
 });
 

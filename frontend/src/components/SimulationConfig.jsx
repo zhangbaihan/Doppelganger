@@ -13,14 +13,16 @@ export default function SimulationConfig({ token, currentUser, onSimulationCreat
   const [items, setItems] = useState(DEFAULT_ITEMS);
   const [availableUsers, setAvailableUsers] = useState([]);
   const [participants, setParticipants] = useState([
-    { userId: currentUser.id, isRandom: false },
-    { userId: null, isRandom: true },
+    { userId: currentUser.id },
+    { userId: 'random' },
   ]);
   const [numSimulations, setNumSimulations] = useState(1);
   const [simulationName, setSimulationName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [draggedItem, setDraggedItem] = useState(null);
   const [boardSize] = useState({ width: 600, height: 400 });
+  const [newItemName, setNewItemName] = useState('');
+  const [showItemNameInput, setShowItemNameInput] = useState(false);
 
   useEffect(() => {
     loadAvailableUsers();
@@ -65,35 +67,52 @@ export default function SimulationConfig({ token, currentUser, onSimulationCreat
   }
 
   function handleAddItem() {
+    if (showItemNameInput && !newItemName.trim()) {
+      return;
+    }
     const newItem = {
       id: Date.now(),
-      name: `Item ${items.length + 1}`,
+      name: newItemName.trim() || `Item ${items.length + 1}`,
       x: 100,
       y: 100,
       type: 'furniture',
     };
     setItems([...items, newItem]);
+    setNewItemName('');
+    setShowItemNameInput(false);
+  }
+
+  function handleAddParticipant() {
+    setParticipants([...participants, { userId: 'random' }]);
+  }
+
+  function handleRemoveParticipant(index) {
+    if (participants.length <= 2) {
+      alert('At least 2 participants are required');
+      return;
+    }
+    setParticipants(participants.filter((_, i) => i !== index));
   }
 
   function handleRemoveItem(itemId) {
     setItems(items.filter((item) => item.id !== itemId));
   }
 
-  function handleParticipantChange(index, field, value) {
+  function handleParticipantChange(index, value) {
     setParticipants((prev) => {
       const updated = [...prev];
-      if (field === 'isRandom') {
-        updated[index] = { ...updated[index], isRandom: value, userId: value ? null : (index === 0 ? currentUser.id : null) };
-      } else if (field === 'userId') {
-        updated[index] = { ...updated[index], userId: value, isRandom: false };
-      }
+      updated[index] = { userId: value === 'random' ? 'random' : parseInt(value) };
       return updated;
     });
   }
 
   async function handleCreateSimulation() {
-    if (participants.filter((p) => !p.isRandom && !p.userId).length > 0) {
-      alert('Please select participants or mark them as random');
+    if (participants.length < 2) {
+      alert('At least 2 participants are required');
+      return;
+    }
+    if (participants.some(p => !p.userId || (p.userId !== 'random' && !p.userId))) {
+      alert('Please select all participants');
       return;
     }
 
@@ -105,16 +124,16 @@ export default function SimulationConfig({ token, currentUser, onSimulationCreat
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          name: simulationName || 'Untitled Simulation',
-          items: items.map(({ id, ...rest }) => rest),
-          participants: participants.map((p, i) => ({
-            userId: p.isRandom ? null : p.userId,
-            isRandom: p.isRandom,
-            role: `agent${i + 1}`,
-          })),
-          numSimulations,
-        }),
+          body: JSON.stringify({
+            name: simulationName || 'Untitled Simulation',
+            items: items.map(({ id, ...rest }) => rest),
+            participants: participants.map((p, i) => ({
+              userId: p.userId === 'random' ? null : p.userId,
+              isRandom: p.userId === 'random',
+              role: `agent${i + 1}`,
+            })),
+            numSimulations,
+          }),
       });
 
       if (!res.ok) {
@@ -151,9 +170,42 @@ export default function SimulationConfig({ token, currentUser, onSimulationCreat
       <div className="config-section">
         <div className="config-header">
           <label className="config-label">World Items</label>
-          <button className="config-btn-small" onClick={handleAddItem}>
-            + Add Item
-          </button>
+          <div className="add-item-controls">
+            {showItemNameInput ? (
+              <>
+                <input
+                  type="text"
+                  className="item-name-input"
+                  value={newItemName}
+                  onChange={(e) => setNewItemName(e.target.value)}
+                  placeholder="Item name..."
+                  maxLength={30}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleAddItem();
+                    } else if (e.key === 'Escape') {
+                      setShowItemNameInput(false);
+                      setNewItemName('');
+                    }
+                  }}
+                />
+                <button className="config-btn-small" onClick={handleAddItem}>
+                  Add
+                </button>
+                <button className="config-btn-small" onClick={() => {
+                  setShowItemNameInput(false);
+                  setNewItemName('');
+                }}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button className="config-btn-small" onClick={() => setShowItemNameInput(true)}>
+                + Add Item
+              </button>
+            )}
+          </div>
         </div>
         <div
           className="config-board"
@@ -184,36 +236,40 @@ export default function SimulationConfig({ token, currentUser, onSimulationCreat
       </div>
 
       <div className="config-section">
-        <label className="config-label">Participants</label>
+        <div className="config-header">
+          <label className="config-label">Participants</label>
+          <button className="config-btn-small" onClick={handleAddParticipant}>
+            + Add Agent
+          </button>
+        </div>
         {participants.map((participant, index) => (
           <div key={index} className="participant-row">
             <span className="participant-label">Agent {index + 1}:</span>
-            <label className="participant-checkbox">
-              <input
-                type="checkbox"
-                checked={participant.isRandom}
-                onChange={(e) => handleParticipantChange(index, 'isRandom', e.target.checked)}
-              />
-              Random
-            </label>
-            {!participant.isRandom && (
-              <select
-                className="participant-select"
-                value={participant.userId || ''}
-                onChange={(e) => handleParticipantChange(index, 'userId', parseInt(e.target.value))}
+            <select
+              className="participant-select"
+              value={participant.userId === 'random' ? 'random' : (participant.userId || '')}
+              onChange={(e) => handleParticipantChange(index, e.target.value)}
+            >
+              <option value="random">Random</option>
+              {index === 0 && (
+                <option value={currentUser.id}>
+                  {currentUser.bit_name} (You)
+                </option>
+              )}
+              {availableUsers.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.bit_name} ({user.name})
+                </option>
+              ))}
+            </select>
+            {participants.length > 2 && (
+              <button
+                className="participant-remove"
+                onClick={() => handleRemoveParticipant(index)}
+                title="Remove agent"
               >
-                <option value="">Select user...</option>
-                {index === 0 && (
-                  <option value={currentUser.id}>
-                    {currentUser.bit_name} (You)
-                  </option>
-                )}
-                {availableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.bit_name} ({user.name})
-                  </option>
-                ))}
-              </select>
+                ×
+              </button>
             )}
           </div>
         ))}

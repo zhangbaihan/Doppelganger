@@ -101,7 +101,7 @@ export default function SimulationViewer({ token, simulationId }) {
   const currentState = states[currentStateIndex] || null;
   const config = simulation.config || {};
   const items = currentState?.items || config.items || [];
-  const agentPositions = currentState?.agentPositions || { agent1: { x: 100, y: 100 }, agent2: { x: 500, y: 400 } };
+  const agentPositions = currentState?.agentPositions || {};
   const transcript = currentState?.transcript || '';
   const narrativeEvents = currentState?.narrativeEvents || [];
 
@@ -146,54 +146,50 @@ export default function SimulationViewer({ token, simulationId }) {
             ))}
 
             {/* Agents */}
-            {agentPositions.agent1 && (
-              <div
-                className="viewer-agent agent1"
-                style={{ left: agentPositions.agent1.x, top: agentPositions.agent1.y }}
-              >
-                <div className="agent-marker" />
-                <span className="agent-label">Agent 1</span>
-              </div>
-            )}
-            {agentPositions.agent2 && (
-              <div
-                className="viewer-agent agent2"
-                style={{ left: agentPositions.agent2.x, top: agentPositions.agent2.y }}
-              >
-                <div className="agent-marker" />
-                <span className="agent-label">Agent 2</span>
-              </div>
-            )}
+            {Object.entries(agentPositions).map(([role, position]) => {
+              const agentNum = role.replace('agent', '');
+              const isEven = parseInt(agentNum) % 2 === 0;
+              return (
+                <div
+                  key={role}
+                  className={`viewer-agent ${isEven ? 'agent2' : 'agent1'}`}
+                  style={{ left: position.x, top: position.y }}
+                >
+                  <div className="agent-marker" />
+                  <span className="agent-label">Agent {agentNum}</span>
+                </div>
+              );
+            })}
           </div>
 
           {/* Controls */}
           <div className="viewer-controls">
             <button className="control-btn" onClick={() => handleStateChange(0)}>
-              ⏮ First
+              First
             </button>
             <button
               className="control-btn"
               onClick={() => handleStateChange(currentStateIndex - 1)}
               disabled={currentStateIndex === 0}
             >
-              ⏪ Prev
+              Prev
             </button>
             <button className="control-btn play-btn" onClick={handlePlayPause}>
-              {isPlaying ? '⏸ Pause' : '▶ Play'}
+              {isPlaying ? 'Pause' : 'Play'}
             </button>
             <button
               className="control-btn"
               onClick={() => handleStateChange(currentStateIndex + 1)}
               disabled={currentStateIndex >= states.length - 1}
             >
-              Next ⏩
+              Next
             </button>
             <button
               className="control-btn"
               onClick={() => handleStateChange(states.length - 1)}
               disabled={currentStateIndex >= states.length - 1}
             >
-              Last ⏭
+              Last
             </button>
             <span className="state-indicator">
               State {currentStateIndex + 1} / {states.length}

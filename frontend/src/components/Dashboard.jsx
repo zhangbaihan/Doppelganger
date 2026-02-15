@@ -131,6 +131,31 @@ export default function Dashboard({ token, user, onUserUpdate }) {
     });
   }
 
+  async function handleDeleteSimulation(simulationId, e) {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this simulation?')) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/api/simulations/${simulationId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        loadSimulations();
+        if (selectedSimulationId === simulationId) {
+          setSelectedSimulationId(null);
+        }
+      } else {
+        alert('Failed to delete simulation');
+      }
+    } catch (err) {
+      console.error('Delete simulation error:', err);
+      alert('Failed to delete simulation');
+    }
+  }
+
   /* ── Recording ───────────────────────────────────────────────── */
 
   async function startRecording() {
@@ -266,7 +291,16 @@ export default function Dashboard({ token, user, onUserUpdate }) {
                       setShowConfig(false);
                     }}
                   >
-                    <h4>{sim.name || 'Untitled Simulation'}</h4>
+                    <div className="sim-card-header">
+                      <h4>{sim.name || 'Untitled Simulation'}</h4>
+                      <button
+                        className="sim-delete-btn"
+                        onClick={(e) => handleDeleteSimulation(sim.id, e)}
+                        title="Delete simulation"
+                      >
+                        ×
+                      </button>
+                    </div>
                     <div className="sim-status">
                       Status: <span className={`status-${sim.status}`}>{sim.status}</span>
                     </div>
@@ -293,7 +327,7 @@ export default function Dashboard({ token, user, onUserUpdate }) {
               loadSimulations();
             }}
           >
-            ← Back to Simulations
+            Back to Simulations
           </button>
         )}
       </div>

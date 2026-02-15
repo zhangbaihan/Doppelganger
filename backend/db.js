@@ -209,6 +209,17 @@ export function getSimulationParticipants(simulationId) {
     .all(simulationId);
 }
 
+export function deleteSimulation(simulationId) {
+  // Delete in order: states -> runs -> participants -> simulation
+  const runs = getSimulationRuns(simulationId);
+  for (const run of runs) {
+    db.prepare('DELETE FROM simulation_states WHERE simulation_run_id = ?').run(run.id);
+  }
+  db.prepare('DELETE FROM simulation_runs WHERE simulation_id = ?').run(simulationId);
+  db.prepare('DELETE FROM simulation_participants WHERE simulation_id = ?').run(simulationId);
+  db.prepare('DELETE FROM simulations WHERE id = ?').run(simulationId);
+}
+
 export function getAllUsers() {
   return db.prepare('SELECT id, name, bit_name, is_trained FROM users WHERE bit_name IS NOT NULL').all();
 }

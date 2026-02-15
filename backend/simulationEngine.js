@@ -132,53 +132,63 @@ export async function runSimulation(simulationId, runIndex, config) {
   const { items, participants } = config;
 
   // Get participant users (handle random selection)
-  let agent1User, agent2User;
+  const agents = [];
+  const allUsers = getAllUsers();
+  const usedUserIds = new Set();
+
+  for (let i = 0; i < participants.length; i++) {
+    const participant = participants[i];
+    let user;
+
+    if (participant.isRandom || participant.userId === 'random') {
+      const availableUsers = allUsers.filter(u => !usedUserIds.has(u.id));
+      if (availableUsers.length === 0) {
+        // Fallback to any user if all are used
+        user = allUsers[Math.floor(Math.random() * allUsers.length)];
+      } else {
+        user = availableUsers[Math.floor(Math.random() * availableUsers.length)];
+      }
+    } else {
+      user = getUserById(participant.userId);
+    }
+
+    if (!user) {
+      throw new Error(`Invalid participant at index ${i}`);
+    }
+
+    usedUserIds.add(user.id);
+    agents.push({
+      ...user,
+      role: `agent${i + 1}`,
+    });
+  }
+
+  if (agents.length < 2) {
+    throw new Error('At least 2 participants are required');
+  }
+
+  // Initialize world state with positions more inside the board
+  const boardWidth = 600;
+  const boardHeight = 400;
+  const margin = 80;
+  const agentPositions = {};
   
-  if (participants[0].isRandom) {
-    const allUsers = getAllUsers();
-    const randomUser = allUsers[Math.floor(Math.random() * allUsers.length)];
-    agent1User = randomUser;
-  } else {
-    agent1User = getUserById(participants[0].userId);
-  }
+  // Distribute agents in a circle/pattern more inside the board
+  agents.forEach((agent, index) => {
+    const angle = (index / agents.length) * Math.PI * 2;
+    const radius = Math.min(boardWidth, boardHeight) * 0.25;
+    const centerX = boardWidth / 2;
+    const centerY = boardHeight / 2;
+    agentPositions[agent.role] = {
+      x: centerX + Math.cos(angle) * radius,
+      y: centerY + Math.sin(angle) * radius,
+    };
+    agent.currentPosition = agentPositions[agent.role];
+  });
 
-  if (participants[1]?.isRandom) {
-    const allUsers = getAllUsers();
-    const filteredUsers = allUsers.filter(u => u.id !== agent1User.id);
-    const randomUser = filteredUsers.length > 0 
-      ? filteredUsers[Math.floor(Math.random() * filteredUsers.length)]
-      : allUsers[Math.floor(Math.random() * allUsers.length)];
-    agent2User = randomUser;
-  } else if (participants[1]?.userId) {
-    agent2User = getUserById(participants[1].userId);
-  } else {
-    // Fallback: use agent1 if only one participant specified
-    agent2User = agent1User;
-  }
-
-  if (!agent1User || !agent2User) {
-    throw new Error('Invalid participants');
-  }
-
-  // Initialize world state
   const worldState = {
     items: items || [],
-    agentPositions: {
-      agent1: { x: 100, y: 100 }, // Starting positions
-      agent2: { x: 500, y: 400 },
-    },
-  };
-
-  // Initialize agents
-  const agent1 = {
-    ...agent1User,
-    role: 'agent1',
-    currentPosition: worldState.agentPositions.agent1,
-  };
-  const agent2 = {
-    ...agent2User,
-    role: 'agent2',
-    currentPosition: worldState.agentPositions.agent2,
+    agentPositions,
   };
 
   // Get simulation run
@@ -206,75 +216,71 @@ export async function runSimulation(simulationId, runIndex, config) {
     0
   );
 
-  // Conversation loop
+  // Conversation loop - cycle through all agents
   for (let turn = 0; turn < maxTurns; turn++) {
-    // Agent 1's turn
-    const agent1Result = await processAgentTurn(
-      agent1,
-      agent2,
-      worldState,
-      conversationHistory,
-      stateIndex
-    );
+    const turnResults = [];
 
-    conversationHistory += `\n${agent1.bit_name}: ${agent1Result.response}`;
-    if (agent1Result.narrativeEvent) {
-      narrativeEvents.push(agent1Result.narrativeEvent);
-      conversationHistory += `\n[${agent1Result.narrativeEvent}]`;
-    }
+    // Each agent takes a turn
+    for (let i = 0; i < agents.length; i++) {
+      const currentAgent = agents[i];
+      const otherAgents = agents.filter((_, idx) => idx !== i);
+      // Use the previous agent as the "other" for context (or first other agent)
+      const otherAgent = otherAgents[0] || agents[(i + 1) % agents.length];
 
-    // Save state after agent 1
-    addSimulationState(
-      run.id,
-      stateIndex++,
-      { ...worldState.agentPositions },
-      conversationHistory,
-      worldState.items,
-      [...narrativeEvents],
-      turn * 2
-    );
-
-    // Check for natural ending
-    if (agent1Result.response.toLowerCase().includes('goodbye') || 
-        agent1Result.response.toLowerCase().includes('see you')) {
-      break;
-    }
-
-    // Agent 2's turn
-    const agent2Result = await processAgentTurn(
-      agent2,
-      agent1,
-      worldState,
-      conversationHistory,
-      stateIndex
-    );
-
-    conversationHistory += `\n${agent2.bit_name}: ${agent2Result.response}`;
-    if (agent2Result.narrativeEvent) {
-      narrativeEvents.push(agent2Result.narrativeEvent);
-      conversationHistory += `\n[${agent2Result.narrativeEvent}]`;
-    }
-
-    // Handle mutual movement (both agents agree to move to same place)
-    if (
-      agent1Result.action.type === 'move' &&
-      agent2Result.action.type === 'move' &&
-      agent1Result.action.target === agent2Result.action.target
-    ) {
-      const targetItem = worldState.items.find(
-        (item) => item.name.toLowerCase() === agent1Result.action.target.toLowerCase()
+      const result = await processAgentTurn(
+        currentAgent,
+        otherAgent,
+        worldState,
+        conversationHistory,
+        stateIndex
       );
-      if (targetItem) {
-        agent1.currentPosition = { x: targetItem.x - 15, y: targetItem.y - 15 };
-        agent2.currentPosition = { x: targetItem.x + 15, y: targetItem.y + 15 };
-        worldState.agentPositions.agent1 = agent1.currentPosition;
-        worldState.agentPositions.agent2 = agent2.currentPosition;
-        narrativeEvents.push(`Both agents move to the ${targetItem.name}`);
-        conversationHistory += `\n[Both agents move to the ${targetItem.name}]`;
+
+      conversationHistory += `\n${currentAgent.bit_name}: ${result.response}`;
+      if (result.narrativeEvent) {
+        narrativeEvents.push(result.narrativeEvent);
+        conversationHistory += `\n[${result.narrativeEvent}]`;
+      }
+
+      turnResults.push({ agent: currentAgent, result });
+
+      // Check for natural ending
+      if (result.response.toLowerCase().includes('goodbye') || 
+          result.response.toLowerCase().includes('see you')) {
+        break;
+      }
+
+      // Small delay between agent turns
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    // Handle mutual movement (agents agreeing to move to same place)
+    const moveActions = turnResults.filter(tr => tr.result.action.type === 'move' && tr.result.action.target);
+    if (moveActions.length >= 2) {
+      const targetName = moveActions[0].result.action.target;
+      const allAgree = moveActions.every(ma => ma.result.action.target.toLowerCase() === targetName.toLowerCase());
+      
+      if (allAgree) {
+        const targetItem = worldState.items.find(
+          (item) => item.name.toLowerCase() === targetName.toLowerCase()
+        );
+        if (targetItem) {
+          // Position agents around the item
+          moveActions.forEach((ma, idx) => {
+            const angle = (idx / moveActions.length) * Math.PI * 2;
+            const offset = 20;
+            ma.agent.currentPosition = {
+              x: targetItem.x + Math.cos(angle) * offset,
+              y: targetItem.y + Math.sin(angle) * offset,
+            };
+            worldState.agentPositions[ma.agent.role] = ma.agent.currentPosition;
+          });
+          narrativeEvents.push(`All agents move to the ${targetItem.name}`);
+          conversationHistory += `\n[All agents move to the ${targetItem.name}]`;
+        }
       }
     }
 
-    // Save state after agent 2
+    // Save state after all agents have taken their turn
     addSimulationState(
       run.id,
       stateIndex++,
@@ -282,16 +288,18 @@ export async function runSimulation(simulationId, runIndex, config) {
       conversationHistory,
       worldState.items,
       [...narrativeEvents],
-      turn * 2 + 1
+      turn
     );
 
-    // Check for natural ending
-    if (agent2Result.response.toLowerCase().includes('goodbye') || 
-        agent2Result.response.toLowerCase().includes('see you')) {
+    // Break if any agent said goodbye
+    if (turnResults.some(tr => 
+      tr.result.response.toLowerCase().includes('goodbye') || 
+      tr.result.response.toLowerCase().includes('see you')
+    )) {
       break;
     }
 
-    // Small delay to avoid rate limiting
+    // Small delay between full turns
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
