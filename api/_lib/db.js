@@ -89,6 +89,73 @@ export async function initDb() {
     )
   `);
 
+  // Playground tables
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS playground_world (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      world_name TEXT DEFAULT 'Stanford Campus',
+      world_config TEXT NOT NULL,
+      current_state TEXT NOT NULL,
+      last_interaction_hour INTEGER,
+      last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS playground_agents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER UNIQUE NOT NULL,
+      agent_name TEXT,
+      position_x REAL,
+      position_y REAL,
+      current_location TEXT,
+      status TEXT DEFAULT 'active',
+      last_interaction_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS playground_interactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      interaction_hour INTEGER NOT NULL,
+      interaction_date DATE NOT NULL,
+      turn_count INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'pending',
+      started_at DATETIME,
+      completed_at DATETIME
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS playground_turns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      interaction_id INTEGER NOT NULL,
+      turn_number INTEGER NOT NULL,
+      agent_role TEXT,
+      other_agent_user_id INTEGER,
+      response_text TEXT,
+      action_type TEXT,
+      action_target TEXT,
+      location_before TEXT,
+      location_after TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS playground_conversations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      interaction_id INTEGER NOT NULL,
+      turn_number INTEGER NOT NULL,
+      agent_user_id INTEGER NOT NULL,
+      other_agent_user_id INTEGER,
+      message TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // Migrations: add columns if missing
   const migrations = [
     `ALTER TABLE users ADD COLUMN profile_data TEXT DEFAULT NULL`,
@@ -354,4 +421,235 @@ export function parseUser(user) {
     confidence_reasoning: JSON.parse(user.confidence_reasoning || 'null'),
     knowledge_base: JSON.parse(user.knowledge_base || 'null'),
   };
+}
+
+/* ── Playground functions ──────────────────────────────────────────── */
+
+export async function getPlaygroundWorld() {
+  const db = await initDb();
+  const result = await db.execute({
+    sql: 'SELECT * FROM playground_world WHERE id = 1',
+    args: [],
+  });
+  if (result.rows.length === 0) {
+    // Initialize world if it doesn't exist
+    const defaultConfig = {
+      name: 'Stanford Campus',
+      locations: [
+        { name: 'Main Quad', x: 300, y: 200, description: 'Central gathering area' },
+        { name: 'Green Library', x: 150, y: 100, description: 'Main library building' },
+        { name: 'Tresidder Union', x: 450, y: 250, description: 'Student center with cafes' },
+        { name: 'Memorial Church', x: 300, y: 150, description: 'Historic chapel' },
+        { name: 'White Plaza', x: 350, y: 300, description: 'Outdoor plaza with tables' },
+        { name: 'Gym', x: 500, y: 100, description: 'Athletic facilities' },
+        { name: 'Coffee House', x: 400, y: 200, description: 'Popular cafe spot' },
+      ],
+      items: [
+        { name: 'Bike Rack', location: 'Main Quad', x: 320, y: 220 },
+        { name: 'Study Table', location: 'Green Library', x: 160, y: 110 },
+        { name: 'Outdoor Seating', location: 'White Plaza', x: 360, y: 310 },
+      ],
+    };
+    const defaultState = {
+      agentPositions: {},
+      activeConversations: [],
+    };
+    await db.execute({
+      sql: 'INSERT INTO playground_world (id, world_name, world_config, current_state) VALUES (?, ?, ?, ?)',
+      args: [
+        1,
+        'Stanford Campus',
+        JSON.stringify(defaultConfig),
+        JSON.stringify(defaultState),
+      ],
+    });
+    return {
+      id: 1,
+      world_name: 'Stanford Campus',
+      world_config: JSON.stringify(defaultConfig),
+      current_state: JSON.stringify(defaultState),
+      last_interaction_hour: null,
+    };
+  }
+  return result.rows[0];
+}
+
+export async function updatePlaygroundWorld(data) {
+  if (!data || typeof data !== 'object') {
+    throw new Error('updatePlaygroundWorld requires a data object');
+  }
+  const db = await initDb();
+  const fields = [];
+  const values = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(typeof value === 'object' && value !== null ? JSON.stringify(value) : value);
+    }
+  }
+  if (fields.length === 0) {
+    return; // Nothing to update
+  }
+  values.push(1);
+  await db.execute({
+    sql: `UPDATE playground_world SET ${fields.join(', ')}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+    args: values,
+  });
+}
+
+export async function getActivePlaygroundAgents() {
+  const db = await initDb();
+  const result = await db.execute({
+    sql: 'SELECT * FROM playground_agents WHERE status = ? ORDER BY created_at ASC',
+    args: ['active'],
+  });
+  return result.rows;
+}
+
+export async function getPlaygroundAgentByUserId(userId) {
+  const db = await initDb();
+  const result = await db.execute({
+    sql: 'SELECT * FROM playground_agents WHERE user_id = ?',
+    args: [userId],
+  });
+  return result.rows[0] || null;
+}
+
+export async function createPlaygroundAgent(userId, agentName, location = 'Main Quad') {
+  const db = await initDb();
+  const world = await getPlaygroundWorld();
+  const config = JSON.parse(world.world_config);
+  const locationData = config.locations.find((l) => l.name === location) || config.locations[0];
+  
+  const result = await db.execute({
+    sql: 'INSERT INTO playground_agents (user_id, agent_name, position_x, position_y, current_location) VALUES (?, ?, ?, ?, ?)',
+    args: [userId, agentName, locationData.x, locationData.y, location],
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export async function updatePlaygroundAgent(userId, data) {
+  if (!data || typeof data !== 'object') {
+    throw new Error('updatePlaygroundAgent requires a data object');
+  }
+  const db = await initDb();
+  const fields = [];
+  const values = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  }
+  if (fields.length === 0) {
+    return; // Nothing to update
+  }
+  values.push(userId);
+  await db.execute({
+    sql: `UPDATE playground_agents SET ${fields.join(', ')} WHERE user_id = ?`,
+    args: values,
+  });
+}
+
+export async function removePlaygroundAgent(userId) {
+  const db = await initDb();
+  await db.execute({
+    sql: 'DELETE FROM playground_agents WHERE user_id = ?',
+    args: [userId],
+  });
+}
+
+export async function getInteractionForHour(userId, hour, date) {
+  const db = await initDb();
+  const result = await db.execute({
+    sql: 'SELECT * FROM playground_interactions WHERE user_id = ? AND interaction_hour = ? AND interaction_date = ?',
+    args: [userId, hour, date],
+  });
+  return result.rows[0] || null;
+}
+
+export async function createInteraction(userId, hour, date) {
+  const db = await initDb();
+  const result = await db.execute({
+    sql: 'INSERT INTO playground_interactions (user_id, interaction_hour, interaction_date, started_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)',
+    args: [userId, hour, date],
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export async function updateInteraction(interactionId, data) {
+  if (!data || typeof data !== 'object') {
+    throw new Error('updateInteraction requires a data object');
+  }
+  const db = await initDb();
+  const fields = [];
+  const values = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  }
+  if (data.status === 'completed' && !data.completed_at) {
+    fields.push('completed_at = CURRENT_TIMESTAMP');
+  }
+  if (fields.length === 0) {
+    return; // Nothing to update
+  }
+  values.push(interactionId);
+  await db.execute({
+    sql: `UPDATE playground_interactions SET ${fields.join(', ')} WHERE id = ?`,
+    args: values,
+  });
+}
+
+export async function addPlaygroundTurn(interactionId, turnNumber, agentRole, otherAgentUserId, responseText, actionType, actionTarget, locationBefore, locationAfter) {
+  const db = await initDb();
+  const result = await db.execute({
+    sql: 'INSERT INTO playground_turns (interaction_id, turn_number, agent_role, other_agent_user_id, response_text, action_type, action_target, location_before, location_after) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    args: [interactionId, turnNumber, agentRole, otherAgentUserId, responseText, actionType, actionTarget, locationBefore, locationAfter],
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export async function addPlaygroundConversation(interactionId, turnNumber, agentUserId, otherAgentUserId, message) {
+  const db = await initDb();
+  await db.execute({
+    sql: 'INSERT INTO playground_conversations (interaction_id, turn_number, agent_user_id, other_agent_user_id, message) VALUES (?, ?, ?, ?, ?)',
+    args: [interactionId, turnNumber, agentUserId, otherAgentUserId, message],
+  });
+}
+
+export async function getInteractionsByUserId(userId, date = null) {
+  const db = await initDb();
+  if (date) {
+    const result = await db.execute({
+      sql: 'SELECT * FROM playground_interactions WHERE user_id = ? AND interaction_date = ? ORDER BY interaction_hour ASC',
+      args: [userId, date],
+    });
+    return result.rows;
+  }
+  const result = await db.execute({
+    sql: 'SELECT * FROM playground_interactions WHERE user_id = ? ORDER BY interaction_date DESC, interaction_hour DESC LIMIT 100',
+    args: [userId],
+  });
+  return result.rows;
+}
+
+export async function getTurnsByInteractionId(interactionId) {
+  const db = await initDb();
+  const result = await db.execute({
+    sql: 'SELECT * FROM playground_turns WHERE interaction_id = ? ORDER BY turn_number ASC',
+    args: [interactionId],
+  });
+  return result.rows;
+}
+
+export async function getConversationsByInteractionId(interactionId) {
+  const db = await initDb();
+  const result = await db.execute({
+    sql: 'SELECT * FROM playground_conversations WHERE interaction_id = ? ORDER BY turn_number ASC',
+    args: [interactionId],
+  });
+  return result.rows;
 }
