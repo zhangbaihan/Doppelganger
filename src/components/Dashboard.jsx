@@ -133,18 +133,19 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
           ...(c.agent_response ? [{ role: 'assistant', text: c.agent_response }] : []),
         ]);
         setMessages(history);
-        if (history.length === 0) {
-          setConversationStarterPrompt(PROMPTS[Math.floor(Math.random() * PROMPTS.length)]);
-        } else {
-          setConversationStarterPrompt(null);
-        }
       } else {
-        setMessages(
-          data.conversations.map((c) => ({ role: 'user', text: c.user_message }))
-        );
-      }
-      if (chatMode === 'training') {
+        const history = data.conversations.flatMap((c) => [
+          ...(c.user_message ? [{ role: 'user', text: c.user_message }] : []),
+          ...(c.agent_response ? [{ role: 'assistant', text: c.agent_response }] : []),
+        ]);
+        setMessages(history);
         setAllTrainingData(data.conversations);
+      }
+      // Only conversation mode gets a starter prompt from Bit
+      if (chatMode === 'freestyle' && data.conversations.length === 0) {
+        setConversationStarterPrompt(PROMPTS[Math.floor(Math.random() * PROMPTS.length)]);
+      } else {
+        setConversationStarterPrompt(null);
       }
     } catch (err) {
       console.error('Failed to load history:', err);
@@ -340,6 +341,8 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
       setMessages([]);
       if (chatMode === 'freestyle') {
         setConversationStarterPrompt(PROMPTS[Math.floor(Math.random() * PROMPTS.length)]);
+      } else {
+        setConversationStarterPrompt(null);
       }
       setError(null);
       loadSavedTranscripts();
@@ -472,7 +475,7 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
   async function sendAudio(blob) {
     const base64 = await blobToBase64(blob);
     const body = { audio: base64, type: chatMode };
-    if (chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt) {
+    if (messages.length === 0 && conversationStarterPrompt) {
       body.initialPrompt = conversationStarterPrompt;
     }
     await sendMessage(body);
@@ -483,7 +486,7 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
     if (!trimmed || isProcessing) return;
     setInputText('');
     const body = { text: trimmed, type: chatMode };
-    if (chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt) {
+    if (messages.length === 0 && conversationStarterPrompt) {
       body.initialPrompt = conversationStarterPrompt;
     }
     sendMessage(body);
@@ -748,13 +751,13 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
 
           <div className="chat-section">
             <div className="chat-messages">
-              {chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt && (
+              {messages.length === 0 && conversationStarterPrompt && (
                 <div className="chat-msg agent">
                   <span className="msg-author">{user.bit_name?.toUpperCase()}</span>
                   <p className="msg-text">{conversationStarterPrompt}</p>
                 </div>
               )}
-              {messages.length === 0 && !(chatMode === 'freestyle' && conversationStarterPrompt) && (
+              {messages.length === 0 && !conversationStarterPrompt && (
                 <div className="chat-empty">
                   {chatMode === 'freestyle'
                     ? `Hit record and chat with ${user.bit_name}. You can talk about anything — ${user.bit_name} will reply.`
