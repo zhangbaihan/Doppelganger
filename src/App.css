@@ -1534,7 +1534,6 @@ body {
 
 .sim-user-card:not(.in-world):hover {
   border-color: var(--primary);
-  transform: translateX(4px);
 }
 
 .sim-user-card:active {
@@ -1596,24 +1595,45 @@ body {
   flex-shrink: 0;
 }
 
-.sim-run-all-btn {
-  padding: 12px;
-  background: var(--primary);
+.sim-start-btn {
+  padding: 14px 24px;
+  background: linear-gradient(135deg, var(--primary), #00b8d4);
   color: var(--bg);
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   font-family: var(--font-pixel);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
   cursor: pointer;
-  letter-spacing: 2px;
-  transition: all 0.2s;
-  margin-top: auto;
+  letter-spacing: 3px;
+  transition: all 0.25s;
+  text-transform: uppercase;
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  flex-shrink: 0;
 }
 
-.sim-run-all-btn:hover {
-  filter: brightness(1.15);
-  transform: translateY(-1px);
+.sim-start-btn:hover {
+  filter: brightness(1.2);
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px rgba(0, 229, 255, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.sim-start-btn:active {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}
+
+.sim-mode-indicator {
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  color: var(--text-dim);
+  letter-spacing: 1.5px;
+  text-align: center;
+  padding: 4px 8px;
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid var(--surface-light);
+  border-radius: 6px;
+  flex-shrink: 0;
 }
 
 /* ── Center panel ────────────────────────────────────────────────── */
@@ -1685,6 +1705,31 @@ body {
   align-items: center;
   gap: 6px;
   z-index: 1;
+  transition: box-shadow 0.15s ease, transform 0.05s ease;
+}
+
+.sim-world-item.draggable {
+  cursor: grab;
+  user-select: none;
+}
+
+.sim-world-item.draggable:hover {
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.3);
+  border-color: var(--primary);
+  background: rgba(0, 229, 255, 0.25);
+}
+
+.sim-world-item.is-dragging {
+  cursor: grabbing;
+  z-index: 100;
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.5);
+  border-color: var(--primary);
+  background: rgba(0, 229, 255, 0.3);
+  transition: none;
+}
+
+.sim-world.dragging-item {
+  cursor: grabbing;
 }
 
 .sim-item-remove {

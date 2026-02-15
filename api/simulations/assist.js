@@ -10,13 +10,13 @@ const tools = [
     type: 'function',
     function: {
       name: 'add_item',
-      description: 'Add a furniture item or feature to the simulation world. Use this to create atmosphere (e.g. "Romantic Table", "Couch", "Bar Counter", "Dance Floor", "Whiteboard").',
+      description: 'Add a furniture item or feature to the simulation world. Use this to create atmosphere (e.g. "Romantic Table", "Couch", "Bar Counter", "Dance Floor", "Whiteboard"). IMPORTANT: Spread items across the 600x400 board — keep at least 80px between items. Use the full board space: corners, edges, and center.',
       parameters: {
         type: 'object',
         properties: {
           name: { type: 'string', description: 'Item name' },
-          x: { type: 'number', description: 'X position on board (0-600)' },
-          y: { type: 'number', description: 'Y position on board (0-400)' },
+          x: { type: 'number', description: 'X position on board (40-560). Spread items out — do NOT cluster near center.' },
+          y: { type: 'number', description: 'Y position on board (40-360). Use the full vertical range.' },
         },
         required: ['name', 'x', 'y'],
       },
@@ -92,17 +92,18 @@ const tools = [
   {
     type: 'function',
     function: {
-      name: 'start_simulation',
-      description: 'Start running the simulation. Set withAllUsers to true to run 1-on-1 pairings with every other user.',
+      name: 'set_simulation_mode',
+      description: 'Configure the simulation run mode. Use "all_users" to set up 1-on-1 pairings between the requesting user and every other user in the database (parallel universes). Use "selected" to run with only the participants currently placed in the world. This does NOT start the simulation — the user will review the setup and click Start when ready.',
       parameters: {
         type: 'object',
         properties: {
-          withAllUsers: {
-            type: 'boolean',
-            description: 'If true, run 1-on-1 with all other users. If false, run with participants currently in the world.',
+          mode: {
+            type: 'string',
+            enum: ['all_users', 'selected'],
+            description: '"all_users" = 1-on-1 with every user in the database. "selected" = only participants in the world.',
           },
         },
-        required: ['withAllUsers'],
+        required: ['mode'],
       },
     },
   },
@@ -147,6 +148,7 @@ export default apiHandler(async (req, res) => {
   const state = currentState || {};
   const itemsStr = (state.items || []).map((i) => `${i.name} at (${i.x}, ${i.y})`).join(', ') || 'None';
   const participantsStr = (state.participants || []).map((p) => `${p.name} (ID: ${p.userId})`).join(', ') || 'None';
+  const modeStr = state.simMode === 'all' ? '1-on-1 with all users' : state.simMode === 'selected' ? 'Selected participants only' : 'Not set yet';
 
   const systemPrompt = `You are a simulation assistant for the Doppelganger app. You help users set up and run simulated worlds where AI agents interact with each other.
 
@@ -157,16 +159,22 @@ CURRENT WORLD STATE:
 - Items in world: ${itemsStr}
 - Participants in world: ${participantsStr}
 - Goal: ${state.goal || 'Not set yet'}
+- Simulation mode: ${modeStr}
 
 YOUR ROLE:
-- Help the user set up simulations by adding items to create a scene, adding participants, and setting goals.
-- When a user describes a scenario (e.g. "I want to find a date at a restaurant"), you MUST call ALL the necessary tools: set_goal, clear_items, add_item (multiple), and start_simulation. Call them all in a SINGLE response using parallel tool calls. Do NOT just describe what you will do — actually call the tools.
+- Help the user SET UP simulations by adding items to create a scene, adding participants, setting goals, and choosing the simulation mode. You do NOT start the simulation — the user will review your setup, make adjustments, and click Start when ready.
+- When a user describes a scenario (e.g. "I want to find a date at a restaurant"), you MUST call ALL the necessary setup tools: set_goal, clear_items, add_item (multiple), and set_simulation_mode. Call them all in a SINGLE response using parallel tool calls. Do NOT just describe what you will do — actually call the tools.
 - Be creative with world setup! A restaurant scene should have tables, candles, a bar, etc. A hackathon scene should have workstations, whiteboards, coffee, snack table, etc.
-- Spread items across the board (600 wide x 400 tall). Don't cluster everything in one spot.
-- Keep your text response brief (1-2 sentences). The tool calls do the real work.
-- If the user wants to test many people, use start_simulation with withAllUsers: true.
-- If they just want specific people to interact, add those participants and start with withAllUsers: false.
-- IMPORTANT: Always call the tools. Never just describe what you would do.`;
+- CRITICAL POSITIONING RULE: The board is 600px wide × 400px tall. You MUST spread items across the ENTIRE board:
+  * Use positions ranging from x=40 to x=560 and y=40 to y=360.
+  * Keep at least 80-100px between items so they don't overlap.
+  * Place items in different zones: corners (e.g. 80,80), edges (e.g. 300,40), center (e.g. 300,200), etc.
+  * Think about spatial relationships: put the bar near the entrance (left side), seating in the center, dance floor on the right, etc.
+  * NEVER place multiple items at the same or very similar coordinates.
+- Keep your text response brief (1-2 sentences). After configuring, remind the user they can drag items around or make changes, then click Start.
+- If the user wants to test many people or find the best match, use set_simulation_mode with mode: "all_users" (this pairs them 1-on-1 with every user in the database).
+- If they want specific people to interact, add those participants with add_participant and use set_simulation_mode with mode: "selected".
+- IMPORTANT: Always call the tools. Never just describe what you would do. But NEVER auto-start the simulation — only configure it.`;
 
   // Build conversation messages
   const messages = [{ role: 'system', content: systemPrompt }];
@@ -221,8 +229,8 @@ YOUR ROLE:
       });
     }
 
-    // If start_simulation was called, no need for more rounds
-    if (roundCalls.some((tc) => tc.name === 'start_simulation')) {
+    // If simulation mode was set, configuration is likely complete
+    if (roundCalls.some((tc) => tc.name === 'set_simulation_mode')) {
       break;
     }
   }

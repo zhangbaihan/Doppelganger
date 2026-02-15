@@ -47,6 +47,14 @@ export default function SimulationWorkspace({ token, user }) {
   const [showAddItem, setShowAddItem] = useState(false);
   const [newItemName, setNewItemName] = useState('');
 
+  /* ── Item dragging ───────────────────────────────────────── */
+  const [draggingItemId, setDraggingItemId] = useState(null);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const worldRef = useRef(null);
+
+  /* ── Simulation mode: null | 'all' | 'selected' ───────────── */
+  const [simMode, setSimMode] = useState(null);
+
   /* ── Simulation control ─────────────────────────────────────── */
   const [thinkingAgent, setThinkingAgent] = useState(null);
   const abortRef = useRef(false);
@@ -79,6 +87,7 @@ export default function SimulationWorkspace({ token, user }) {
         if (s.items) setItems(s.items);
         if (s.participants) setParticipants(s.participants);
         if (s.goal) setGoal(s.goal);
+        if (s.simMode) setSimMode(s.simMode);
         if (s.chatMessages) setChatMessages(s.chatMessages);
         if (s.liveMessages) setLiveMessages(s.liveMessages);
         if (s.agentPositions) setAgentPositions(s.agentPositions);
@@ -94,7 +103,7 @@ export default function SimulationWorkspace({ token, user }) {
     setChatMessages([
       {
         role: 'assistant',
-        text: "Describe what kind of simulation you'd like to run. For example: \"I want to be matched with a date! Simulate dates with other users grabbing coffee at CoHo\". or \"Help me find a hackathon partner\". You can also drag users from the left into the world!",
+        text: "Describe what kind of simulation you'd like to run. For example: \"I want to be matched with a date! Simulate dates with other users grabbing coffee at CoHo\" or \"Help me find a hackathon partner\". I'll set up the world for you — then you can drag things around and click Start when you're ready!",
       },
     ]);
   }, []);
@@ -110,7 +119,7 @@ export default function SimulationWorkspace({ token, user }) {
 
   // Use a ref to always have the latest state for the unmount save
   const stateRef = useRef({});
-  stateRef.current = { phase, items, participants, goal, chatMessages, liveMessages, agentPositions, scores, pairingInfo };
+  stateRef.current = { phase, items, participants, goal, simMode, chatMessages, liveMessages, agentPositions, scores, pairingInfo };
 
   useEffect(() => {
     const saveSession = () => {
@@ -238,6 +247,49 @@ export default function SimulationWorkspace({ token, user }) {
     setShowAddItem(false);
   }
 
+  /* ── Item dragging handlers ─────────────────────────────────── */
+
+  const handleItemMouseDown = useCallback((e, itemId) => {
+    if (phase !== 'setup') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const item = items.find((i) => i.id === itemId);
+    if (!item) return;
+    const rect = worldRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    dragOffsetRef.current = {
+      x: e.clientX - rect.left - item.x,
+      y: e.clientY - rect.top - item.y,
+    };
+    setDraggingItemId(itemId);
+  }, [phase, items]);
+
+  const handleItemMouseMove = useCallback((e) => {
+    if (draggingItemId == null) return;
+    const rect = worldRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = Math.max(20, Math.min(e.clientX - rect.left - dragOffsetRef.current.x, BOARD_W - 20));
+    const y = Math.max(20, Math.min(e.clientY - rect.top - dragOffsetRef.current.y, BOARD_H - 20));
+    setItems((prev) =>
+      prev.map((item) => (item.id === draggingItemId ? { ...item, x, y } : item))
+    );
+  }, [draggingItemId]);
+
+  const handleItemMouseUp = useCallback(() => {
+    setDraggingItemId(null);
+  }, []);
+
+  useEffect(() => {
+    if (draggingItemId != null) {
+      window.addEventListener('mousemove', handleItemMouseMove);
+      window.addEventListener('mouseup', handleItemMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleItemMouseMove);
+        window.removeEventListener('mouseup', handleItemMouseUp);
+      };
+    }
+  }, [draggingItemId, handleItemMouseMove, handleItemMouseUp]);
+
   /* ── Assistant chat ────────────────────────────────────────── */
 
   async function handleChatSubmit(text) {
@@ -259,7 +311,7 @@ export default function SimulationWorkspace({ token, user }) {
         },
         body: JSON.stringify({
           ...payload,
-          currentState: { items, participants, goal },
+          currentState: { items, participants, goal, simMode },
           chatHistory: chatMessages.slice(-10),
         }),
       });
@@ -298,14 +350,64 @@ export default function SimulationWorkspace({ token, user }) {
     }
   }
 
+  /* ── Smart layout: resolve overlapping items ───────────────── */
+
+  function resolveItemLayout(itemsList) {
+    if (itemsList.length <= 1) return itemsList;
+
+    const PADDING = 80; // minimum distance between item centers
+    const MARGIN = 40;  // board edge margin
+    const resolved = [...itemsList];
+
+    // Check if items are overlapping (within PADDING distance)
+    function hasOverlap(list) {
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const dx = list[i].x - list[j].x;
+          const dy = list[i].y - list[j].y;
+          if (Math.sqrt(dx * dx + dy * dy) < PADDING) return true;
+        }
+      }
+      return false;
+    }
+
+    if (!hasOverlap(resolved)) return resolved;
+
+    // Items overlap — redistribute using a smart grid layout
+    const count = resolved.length;
+    const usableW = BOARD_W - MARGIN * 2;
+    const usableH = BOARD_H - MARGIN * 2;
+
+    // Determine grid dimensions
+    const cols = Math.ceil(Math.sqrt(count * (usableW / usableH)));
+    const rows = Math.ceil(count / cols);
+    const cellW = usableW / cols;
+    const cellH = usableH / rows;
+
+    for (let i = 0; i < resolved.length; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      // Center item within its grid cell, with slight randomness for natural look
+      const jitterX = (Math.random() - 0.5) * cellW * 0.2;
+      const jitterY = (Math.random() - 0.5) * cellH * 0.2;
+      resolved[i] = {
+        ...resolved[i],
+        x: Math.round(Math.max(MARGIN, Math.min(BOARD_W - MARGIN, MARGIN + cellW * (col + 0.5) + jitterX))),
+        y: Math.round(Math.max(MARGIN, Math.min(BOARD_H - MARGIN, MARGIN + cellH * (row + 0.5) + jitterY))),
+      };
+    }
+
+    return resolved;
+  }
+
   /* ── Execute tool calls from LLM ───────────────────────────── */
 
   function executeToolCalls(toolCalls) {
     let localItems = [...items];
     let localParticipants = [...participants];
     let localGoal = goal;
-    let shouldStart = false;
-    let withAll = false;
+    let localSimMode = simMode;
+    let itemsAdded = 0;
 
     for (const call of toolCalls) {
       const args = call.args || {};
@@ -315,6 +417,7 @@ export default function SimulationWorkspace({ token, user }) {
             ...localItems,
             { id: Date.now() + Math.random(), name: args.name, x: args.x || 300, y: args.y || 200 },
           ];
+          itemsAdded++;
           break;
         case 'remove_item':
           localItems = localItems.filter(
@@ -349,22 +452,21 @@ export default function SimulationWorkspace({ token, user }) {
         case 'set_goal':
           localGoal = args.goal || '';
           break;
-        case 'start_simulation':
-          shouldStart = true;
-          withAll = !!args.withAllUsers;
+        case 'set_simulation_mode':
+          localSimMode = args.mode === 'all_users' ? 'all' : 'selected';
           break;
       }
+    }
+
+    // If items were added, resolve any overlapping positions
+    if (itemsAdded > 0) {
+      localItems = resolveItemLayout(localItems);
     }
 
     setItems(localItems);
     setParticipants(localParticipants);
     setGoal(localGoal);
-
-    if (shouldStart) {
-      setTimeout(() => {
-        startSimulation(withAll, localItems, localParticipants, localGoal);
-      }, 300);
-    }
+    setSimMode(localSimMode);
   }
 
   /* ── Simulation execution ──────────────────────────────────── */
@@ -732,6 +834,7 @@ export default function SimulationWorkspace({ token, user }) {
                 setLiveMessages([]);
                 setAgentPositions({});
                 setViewingHistoryItem(null);
+                setSimMode(null);
               }}
             >
               NEW SIMULATION
@@ -779,26 +882,6 @@ export default function SimulationWorkspace({ token, user }) {
                     );
                   })}
                 </div>
-                {phase === 'setup' && allUsers.length > 1 && (
-                  <button
-                    className="sim-run-all-btn"
-                    onClick={() => {
-                      if (!goal) {
-                        setChatMessages((prev) => [
-                          ...prev,
-                          {
-                            role: 'assistant',
-                            text: "Set a goal first! Tell me what you're looking for (e.g. \"I want to find a study buddy\").",
-                          },
-                        ]);
-                        return;
-                      }
-                      startSimulation(true, items, participants, goal);
-                    }}
-                  >
-                    RUN 1-ON-1 WITH ALL
-                  </button>
-                )}
               </>
             ) : (
               <>
@@ -844,21 +927,23 @@ export default function SimulationWorkspace({ token, user }) {
         {pairingInfo && <div className="sim-pairing-info">{pairingInfo}</div>}
 
         <div
-          className={`sim-world ${phase === 'setup' ? 'droppable' : ''}`}
+          ref={worldRef}
+          className={`sim-world ${phase === 'setup' ? 'droppable' : ''} ${draggingItemId != null ? 'dragging-item' : ''}`}
           onDrop={phase === 'setup' ? handleWorldDrop : undefined}
           onDragOver={phase === 'setup' ? handleWorldDragOver : undefined}
         >
           {items.map((item) => (
             <div
               key={item.id}
-              className="sim-world-item"
+              className={`sim-world-item ${phase === 'setup' ? 'draggable' : ''} ${draggingItemId === item.id ? 'is-dragging' : ''}`}
               style={{ left: item.x, top: item.y }}
+              onMouseDown={(e) => handleItemMouseDown(e, item.id)}
             >
               <span>{item.name}</span>
               {phase === 'setup' && (
                 <button
                   className="sim-item-remove"
-                  onClick={() => removeItem(item.id)}
+                  onClick={(e) => { e.stopPropagation(); removeItem(item.id); }}
                 >
                   ×
                 </button>
@@ -929,6 +1014,46 @@ export default function SimulationWorkspace({ token, user }) {
         )}
 
         {goal && <div className="sim-goal-display">GOAL: {goal}</div>}
+
+        {phase === 'setup' && simMode && (
+          <div className="sim-mode-indicator">
+            {simMode === 'all'
+              ? 'MODE: 1-on-1 with all users'
+              : `MODE: Selected participants (${participants.length} in world)`}
+          </div>
+        )}
+
+        {phase === 'setup' && (goal || items.length > 0 || participants.length > 0) && (
+          <button
+            className="sim-start-btn"
+            onClick={() => {
+              if (!goal) {
+                setChatMessages((prev) => [
+                  ...prev,
+                  {
+                    role: 'assistant',
+                    text: "Set a goal first! Tell me what you're looking for (e.g. \"I want to find a study buddy\").",
+                  },
+                ]);
+                return;
+              }
+              const useAll = simMode === 'all';
+              if (!useAll && participants.length < 1) {
+                setChatMessages((prev) => [
+                  ...prev,
+                  {
+                    role: 'assistant',
+                    text: 'Add some participants first! Drag agents from the left panel into the world, or ask me to set it up.',
+                  },
+                ]);
+                return;
+              }
+              startSimulation(useAll, items, participants, goal);
+            }}
+          >
+            START SIMULATION
+          </button>
+        )}
       </div>
 
       {/* ═══ RIGHT PANEL ═══ */}
