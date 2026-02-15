@@ -52,6 +52,11 @@ export default function SimulationWorkspace({ token, user }) {
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   const worldRef = useRef(null);
 
+  /* ── Participant dragging ───────────────────────────────── */
+  const [draggingParticipantId, setDraggingParticipantId] = useState(null);
+  const participantDragStartRef = useRef({ x: 0, y: 0 });
+  const participantDidDragRef = useRef(false);
+
   /* ── Simulation mode: null | 'all' | 'selected' ───────────── */
   const [simMode, setSimMode] = useState(null);
 
@@ -289,6 +294,59 @@ export default function SimulationWorkspace({ token, user }) {
       };
     }
   }, [draggingItemId, handleItemMouseMove, handleItemMouseUp]);
+
+  /* ── Participant dragging handlers ───────────────────────── */
+
+  const handleParticipantMouseDown = useCallback((e, userId) => {
+    if (phase !== 'setup') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const p = participants.find((pp) => pp.userId === userId);
+    if (!p) return;
+    const rect = worldRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    dragOffsetRef.current = {
+      x: e.clientX - rect.left - p.position.x,
+      y: e.clientY - rect.top - p.position.y,
+    };
+    participantDragStartRef.current = { x: e.clientX, y: e.clientY };
+    participantDidDragRef.current = false;
+    setDraggingParticipantId(userId);
+  }, [phase, participants]);
+
+  const handleParticipantMouseMove = useCallback((e) => {
+    if (draggingParticipantId == null) return;
+    const dx = e.clientX - participantDragStartRef.current.x;
+    const dy = e.clientY - participantDragStartRef.current.y;
+    if (!participantDidDragRef.current && Math.sqrt(dx * dx + dy * dy) > 5) {
+      participantDidDragRef.current = true;
+    }
+    const rect = worldRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = Math.max(20, Math.min(e.clientX - rect.left - dragOffsetRef.current.x, BOARD_W - 20));
+    const y = Math.max(20, Math.min(e.clientY - rect.top - dragOffsetRef.current.y, BOARD_H - 20));
+    setParticipants((prev) =>
+      prev.map((p) => (p.userId === draggingParticipantId ? { ...p, position: { x, y } } : p))
+    );
+  }, [draggingParticipantId]);
+
+  const handleParticipantMouseUp = useCallback(() => {
+    if (draggingParticipantId != null && !participantDidDragRef.current) {
+      removeParticipant(draggingParticipantId);
+    }
+    setDraggingParticipantId(null);
+  }, [draggingParticipantId]);
+
+  useEffect(() => {
+    if (draggingParticipantId != null) {
+      window.addEventListener('mousemove', handleParticipantMouseMove);
+      window.addEventListener('mouseup', handleParticipantMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleParticipantMouseMove);
+        window.removeEventListener('mouseup', handleParticipantMouseUp);
+      };
+    }
+  }, [draggingParticipantId, handleParticipantMouseMove, handleParticipantMouseUp]);
 
   /* ── Assistant chat ────────────────────────────────────────── */
 
@@ -881,6 +939,41 @@ export default function SimulationWorkspace({ token, user }) {
                       </div>
                     );
                   })}
+                  {phase === 'setup' && (
+                    showAddItem ? (
+                      <div className="sim-add-item-inline">
+                        <input
+                          className="sim-add-item-input"
+                          value={newItemName}
+                          onChange={(e) => setNewItemName(e.target.value)}
+                          placeholder="Item name..."
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleManualAddItem();
+                            if (e.key === 'Escape') setShowAddItem(false);
+                          }}
+                          autoFocus
+                        />
+                        <div className="sim-add-item-actions">
+                          <button className="sim-btn-small" onClick={handleManualAddItem}>
+                            Add
+                          </button>
+                          <button className="sim-btn-small" onClick={() => setShowAddItem(false)}>
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        className="sim-user-card sim-add-item-card"
+                        onClick={() => setShowAddItem(true)}
+                      >
+                        <div className="sim-user-avatar sim-add-item-avatar">+</div>
+                        <div className="sim-user-info">
+                          <span className="sim-user-name">Add Item</span>
+                        </div>
+                      </div>
+                    )
+                  )}
                 </div>
               </>
             ) : (
@@ -924,11 +1017,44 @@ export default function SimulationWorkspace({ token, user }) {
 
       {/* ═══ CENTER PANEL ═══ */}
       <div className="sim-center-panel">
+        {/* Chat input at the top */}
+        {phase === 'setup' && (
+          <div className="sim-chat-bar sim-chat-bar-top">
+            <input
+              className="sim-chat-input"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Describe your simulation scenario..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleChatSubmit(chatInput);
+                }
+              }}
+              disabled={assistLoading}
+            />
+            <button
+              className={`sim-voice-btn ${isRecording ? 'recording' : ''}`}
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={assistLoading}
+            >
+              <div className="sim-voice-icon" />
+            </button>
+            <button
+              className="sim-send-btn"
+              onClick={() => handleChatSubmit(chatInput)}
+              disabled={!chatInput.trim() || assistLoading}
+            >
+              SEND
+            </button>
+          </div>
+        )}
+
         {pairingInfo && <div className="sim-pairing-info">{pairingInfo}</div>}
 
         <div
           ref={worldRef}
-          className={`sim-world ${phase === 'setup' ? 'droppable' : ''} ${draggingItemId != null ? 'dragging-item' : ''}`}
+          className={`sim-world ${phase === 'setup' ? 'droppable' : ''} ${(draggingItemId != null || draggingParticipantId != null) ? 'dragging-item' : ''}`}
           onDrop={phase === 'setup' ? handleWorldDrop : undefined}
           onDragOver={phase === 'setup' ? handleWorldDragOver : undefined}
         >
@@ -955,10 +1081,10 @@ export default function SimulationWorkspace({ token, user }) {
             participants.map((p) => (
               <div
                 key={p.userId}
-                className="sim-world-agent agent-primary setup-agent"
+                className={`sim-world-agent agent-primary setup-agent ${draggingParticipantId === p.userId ? 'is-dragging' : ''}`}
                 style={{ left: p.position.x, top: p.position.y }}
-                onClick={() => removeParticipant(p.userId)}
-                title="Click to remove"
+                onMouseDown={(e) => handleParticipantMouseDown(e, p.userId)}
+                title="Drag to move · Click to remove"
               >
                 <div className="sim-agent-dot" />
                 <span className="sim-agent-label">{p.bitName}</span>
@@ -982,36 +1108,6 @@ export default function SimulationWorkspace({ token, user }) {
             </div>
           )}
         </div>
-
-        {phase === 'setup' && (
-          <div className="sim-manual-controls">
-            {showAddItem ? (
-              <div className="sim-add-item-row">
-                <input
-                  className="sim-add-item-input"
-                  value={newItemName}
-                  onChange={(e) => setNewItemName(e.target.value)}
-                  placeholder="Item name..."
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleManualAddItem();
-                    if (e.key === 'Escape') setShowAddItem(false);
-                  }}
-                  autoFocus
-                />
-                <button className="sim-btn-small" onClick={handleManualAddItem}>
-                  Add
-                </button>
-                <button className="sim-btn-small" onClick={() => setShowAddItem(false)}>
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button className="sim-btn-small" onClick={() => setShowAddItem(true)}>
-                + ADD ITEM
-              </button>
-            )}
-          </div>
-        )}
 
         {goal && <div className="sim-goal-display">GOAL: {goal}</div>}
 
@@ -1158,47 +1254,47 @@ export default function SimulationWorkspace({ token, user }) {
         )}
       </div>
 
-      {/* ═══ CHAT BAR ═══ */}
-      <div className="sim-chat-bar">
-        {phase === 'running' && (
-          <div className="sim-progress-bar">
-            <div className="sim-progress-fill" style={{ width: `${(turnCount / MAX_TURNS) * 100}%` }} />
-          </div>
-        )}
-        <input
-          className="sim-chat-input"
-          value={chatInput}
-          onChange={(e) => setChatInput(e.target.value)}
-          placeholder={
-            phase === 'setup'
-              ? 'Describe your simulation scenario...'
-              : phase === 'running'
+      {/* ═══ CHAT BAR (non-setup phases) ═══ */}
+      {phase !== 'setup' && (
+        <div className="sim-chat-bar">
+          {phase === 'running' && (
+            <div className="sim-progress-bar">
+              <div className="sim-progress-fill" style={{ width: `${(turnCount / MAX_TURNS) * 100}%` }} />
+            </div>
+          )}
+          <input
+            className="sim-chat-input"
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            placeholder={
+              phase === 'running'
                 ? 'Simulation in progress...'
                 : 'Start a new simulation...'
-          }
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleChatSubmit(chatInput);
             }
-          }}
-          disabled={assistLoading || phase === 'running'}
-        />
-        <button
-          className={`sim-voice-btn ${isRecording ? 'recording' : ''}`}
-          onClick={isRecording ? stopRecording : startRecording}
-          disabled={assistLoading || phase === 'running'}
-        >
-          <div className="sim-voice-icon" />
-        </button>
-        <button
-          className="sim-send-btn"
-          onClick={() => handleChatSubmit(chatInput)}
-          disabled={!chatInput.trim() || assistLoading || phase === 'running'}
-        >
-          SEND
-        </button>
-      </div>
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleChatSubmit(chatInput);
+              }
+            }}
+            disabled={assistLoading || phase === 'running'}
+          />
+          <button
+            className={`sim-voice-btn ${isRecording ? 'recording' : ''}`}
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={assistLoading || phase === 'running'}
+          >
+            <div className="sim-voice-icon" />
+          </button>
+          <button
+            className="sim-send-btn"
+            onClick={() => handleChatSubmit(chatInput)}
+            disabled={!chatInput.trim() || assistLoading || phase === 'running'}
+          >
+            SEND
+          </button>
+        </div>
+      )}
     </div>
   );
 }

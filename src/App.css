@@ -1457,11 +1457,15 @@ body {
   grid-column: 1;
   border-right: 1px solid var(--surface-light);
   overflow-y: auto;
+  overflow-x: visible;
   padding: 16px;
+  padding-right: 22px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   background: var(--bg);
+  z-index: 2;
+  position: relative;
 }
 
 .sim-panel-title {
@@ -1535,6 +1539,7 @@ body {
 
 .sim-user-card:not(.in-world):hover {
   border-color: var(--primary);
+  transform: translateX(6px);
 }
 
 .sim-user-card:active {
@@ -1755,7 +1760,13 @@ body {
 }
 
 .sim-world-agent.setup-agent {
-  cursor: pointer;
+  cursor: grab;
+}
+
+.sim-world-agent.setup-agent:active,
+.sim-world-agent.setup-agent.is-dragging {
+  cursor: grabbing;
+  transition: none;
 }
 
 .sim-world-agent.setup-agent:hover .sim-agent-dot {
@@ -1803,6 +1814,42 @@ body {
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+.sim-add-item-card {
+  cursor: pointer !important;
+  border-style: solid !important;
+  opacity: 0.7;
+  transition: all 0.2s;
+}
+
+.sim-add-item-card:hover {
+  opacity: 1;
+  border-color: var(--primary) !important;
+  transform: translateX(6px);
+}
+
+.sim-add-item-avatar {
+  font-size: 16px !important;
+  font-family: inherit !important;
+  background: var(--surface-light) !important;
+  color: var(--primary) !important;
+}
+
+.sim-add-item-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--primary-dim);
+  border-radius: 8px;
+}
+
+.sim-add-item-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
 .sim-add-item-input {
@@ -2066,6 +2113,16 @@ body {
   background: var(--surface);
   border-top: 1px solid var(--surface-light);
   position: relative;
+}
+
+.sim-chat-bar.sim-chat-bar-top {
+  grid-row: unset;
+  grid-column: unset;
+  background: transparent;
+  border: none;
+  padding: 8px 0;
+  margin-bottom: 0;
+  justify-content: flex-start;
 }
 
 .sim-chat-input {
