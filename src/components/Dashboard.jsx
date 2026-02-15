@@ -56,7 +56,7 @@ const SCORE_DOMAINS = [
 
 const TABS = [
   { id: 'train', label: 'TRAIN' },
-  { id: 'data', label: 'TRAINING DATA' },
+  { id: 'data', label: 'PROFILE' },
   { id: 'sim', label: 'SIMULATION' },
 ];
 
@@ -969,7 +969,7 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
         </>
       )}
 
-      {/* ═══ TRAINING DATA TAB ═══ */}
+      {/* ═══ PROFILE TAB ═══ */}
       {tab === 'data' && (
         <>
           {/* Editable Profile */}
