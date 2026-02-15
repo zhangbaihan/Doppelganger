@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import SimulationConfig from './SimulationConfig';
 import SimulationViewer from './SimulationViewer';
+import PlaygroundViewer from './PlaygroundViewer';
 
 const PROMPTS = [
   "Describe yourself however you'd like!",
@@ -84,6 +85,9 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
   const [selectedSimulationId, setSelectedSimulationId] = useState(null);
   const [showSimConfig, setShowSimConfig] = useState(false);
   const [simRunning, setSimRunning] = useState(false);
+
+  // Playground state
+  const [showPlayground, setShowPlayground] = useState(false);
 
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -485,12 +489,32 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
 
   /* ── Render ──────────────────────────────────────────────────── */
 
+  // Show playground view if enabled — uses full-width layout
+  if (showPlayground) {
+    return (
+      <div className="pg-wrapper">
+        <PlaygroundViewer
+          token={token}
+          user={user}
+          onBack={() => setShowPlayground(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="dashboard">
       {error && <div className="error-toast">{error}</div>}
 
-      {/* Header with logout */}
+      {/* Header with logout and playground */}
       <div className="dashboard-header">
+        <button
+          className="logout-btn"
+          onClick={() => setShowPlayground(true)}
+          style={{ marginRight: '12px' }}
+        >
+          PLAYGROUND
+        </button>
         <button className="logout-btn" onClick={onLogout}>LOGOUT</button>
       </div>
 

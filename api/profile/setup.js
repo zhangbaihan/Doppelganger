@@ -1,4 +1,4 @@
-import { getUserById, updateUser, parseUser } from '../_lib/db.js';
+import { getUserById, updateUser, parseUser, getPlaygroundAgentByUserId, createPlaygroundAgent, getPlaygroundWorld } from '../_lib/db.js';
 import { verifyToken } from '../_lib/auth.js';
 import { apiHandler } from '../_lib/handler.js';
 
@@ -33,6 +33,20 @@ export default apiHandler(async (req, res) => {
     name: realName.trim(),
     profile_data: profileData,
   });
+
+  // Auto-join playground if not already joined
+  const existingAgent = await getPlaygroundAgentByUserId(decoded.userId);
+  if (!existingAgent) {
+    try {
+      const world = await getPlaygroundWorld();
+      const worldConfig = JSON.parse(world.world_config);
+      const startingLocation = worldConfig.locations[0].name; // Main Quad
+      await createPlaygroundAgent(decoded.userId, bitName.trim(), startingLocation);
+    } catch (err) {
+      console.error('Failed to auto-join playground:', err);
+      // Don't fail the setup if playground join fails
+    }
+  }
 
   const user = await getUserById(decoded.userId);
   res.json({ user: parseUser(user) });

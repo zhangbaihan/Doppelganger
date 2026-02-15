@@ -6,6 +6,9 @@
     },
     "api/simulations/[id]/run.js": {
       "maxDuration": 60
+    },
+    "api/playground/process-hourly.js": {
+      "maxDuration": 300
     }
   }
 }
