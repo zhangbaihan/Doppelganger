@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import SimulationConfig from './SimulationConfig';
+import SimulationViewer from './SimulationViewer';
 
 const PROMPTS = [
   "Describe yourself however you'd like!",
@@ -26,6 +28,7 @@ const SCORE_DOMAINS = [
 const TABS = [
   { id: 'train', label: 'TRAIN' },
   { id: 'data', label: 'TRAINING DATA' },
+  { id: 'sim', label: 'SIMULATION' },
 ];
 
 const PROFILE_FIELDS = [
@@ -75,6 +78,12 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
   const [kbEditValue, setKbEditValue] = useState('');
   const [addingKbEntry, setAddingKbEntry] = useState(null); // { cat, sub }
   const [kbAddValue, setKbAddValue] = useState('');
+
+  // Simulation state
+  const [simulations, setSimulations] = useState([]);
+  const [selectedSimulationId, setSelectedSimulationId] = useState(null);
+  const [showSimConfig, setShowSimConfig] = useState(false);
+  const [simRunning, setSimRunning] = useState(false);
 
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -185,6 +194,68 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
     setKbAddValue('');
     saveUpdate({ knowledgeBase: kb }).catch(() => setError('Failed to save'));
   }
+
+  /* ── Simulation helpers ──────────────────────────────────────── */
+
+  async function loadSimulations() {
+    try {
+      const res = await fetch('/api/simulations', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSimulations(data.simulations || []);
+      }
+    } catch (err) {
+      console.error('Failed to load simulations:', err);
+    }
+  }
+
+  async function handleSimulationCreated(simulationId) {
+    setShowSimConfig(false);
+    setSelectedSimulationId(simulationId);
+    setSimRunning(true);
+
+    try {
+      const res = await fetch(`/api/simulations/${simulationId}/run`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Simulation failed');
+      }
+    } catch (err) {
+      console.error('Simulation run error:', err);
+      setError(err.message || 'Simulation failed');
+    } finally {
+      setSimRunning(false);
+      loadSimulations();
+    }
+  }
+
+  async function handleDeleteSimulation(simulationId, e) {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/simulations/${simulationId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        loadSimulations();
+        if (selectedSimulationId === simulationId) {
+          setSelectedSimulationId(null);
+        }
+      }
+    } catch (err) {
+      console.error('Delete simulation error:', err);
+    }
+  }
+
+  // Load simulations when switching to sim tab
+  useEffect(() => {
+    if (tab === 'sim') loadSimulations();
+  }, [tab]);
 
   /* ── Recording ───────────────────────────────────────────────── */
 
@@ -812,6 +883,114 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ═══ SIMULATION TAB ═══ */}
+      {tab === 'sim' && (
+        <>
+          {showSimConfig ? (
+            <>
+              <SimulationConfig
+                token={token}
+                currentUser={user}
+                onSimulationCreated={handleSimulationCreated}
+              />
+              <button
+                className="back-btn"
+                onClick={() => setShowSimConfig(false)}
+              >
+                Back to Simulations
+              </button>
+            </>
+          ) : selectedSimulationId ? (
+            <>
+              {simRunning ? (
+                <div className="sim-running-indicator">
+                  <div className="processing-dots">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <p className="sim-running-text">
+                    Running simulation... This may take a minute.
+                  </p>
+                </div>
+              ) : (
+                <SimulationViewer
+                  token={token}
+                  simulationId={selectedSimulationId}
+                />
+              )}
+              <button
+                className="back-btn"
+                onClick={() => {
+                  setSelectedSimulationId(null);
+                  loadSimulations();
+                }}
+              >
+                Back to Simulations
+              </button>
+            </>
+          ) : (
+            <div className="simulations-list">
+              <div className="simulations-header">
+                <h3 className="section-title" style={{ margin: 0 }}>
+                  SIMULATIONS
+                </h3>
+                <button
+                  className="config-submit-btn"
+                  onClick={() => setShowSimConfig(true)}
+                >
+                  + NEW SIMULATION
+                </button>
+              </div>
+              {simulations.length === 0 ? (
+                <div className="simulations-empty">
+                  <p>No simulations yet. Create one to get started!</p>
+                </div>
+              ) : (
+                <div className="simulations-grid">
+                  {simulations.map((sim) => (
+                    <div
+                      key={sim.id}
+                      className="simulation-card"
+                      onClick={() => {
+                        setSelectedSimulationId(Number(sim.id));
+                        setShowSimConfig(false);
+                      }}
+                    >
+                      <div className="sim-card-header">
+                        <h4>{sim.name || 'Untitled Simulation'}</h4>
+                        <button
+                          className="sim-delete-btn"
+                          onClick={(e) =>
+                            handleDeleteSimulation(Number(sim.id), e)
+                          }
+                          title="Delete simulation"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <div className="sim-status">
+                        Status:{' '}
+                        <span className={`status-${sim.status}`}>
+                          {sim.status}
+                        </span>
+                      </div>
+                      <div className="sim-meta">
+                        {sim.num_simulations} simulation
+                        {Number(sim.num_simulations) !== 1 ? 's' : ''}
+                      </div>
+                      <div className="sim-date">
+                        {new Date(sim.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </>

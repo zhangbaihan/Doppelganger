@@ -3,6 +3,9 @@
   "functions": {
     "api/chat/message.js": {
       "maxDuration": 60
+    },
+    "api/simulations/[id]/run.js": {
+      "maxDuration": 60
     }
   }
 }
