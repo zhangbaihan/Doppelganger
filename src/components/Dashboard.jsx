@@ -864,7 +864,7 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
                 onClick={() => setShowPrompts((p) => !p)}
               >
                 <span className="section-title" style={{ margin: 0 }}>
-                  CONVERSATION STARTERS
+                  You could talk about...
                 </span>
                 <span className="prompts-arrow">
                   {showPrompts ? '\u25B2' : '\u25BC'}
