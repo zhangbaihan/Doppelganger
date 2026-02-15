@@ -407,6 +407,7 @@ export default function SimulationWorkspace({ token, user }) {
     let localGoal = goal;
     let localSimMode = simMode;
     let itemsAdded = 0;
+    let participantsAdded = false;
 
     for (const call of toolCalls) {
       const args = call.args || {};
@@ -442,6 +443,7 @@ export default function SimulationWorkspace({ token, user }) {
                 },
               },
             ];
+            participantsAdded = true;
           }
           break;
         }
@@ -455,6 +457,13 @@ export default function SimulationWorkspace({ token, user }) {
           localSimMode = args.mode === 'all_users' ? 'all' : 'selected';
           break;
       }
+    }
+
+    // If specific participants were added, force "selected" mode.
+    // Adding named participants is contradictory with "all_users" mode
+    // (which ignores participants and pairs the current user with everyone).
+    if (participantsAdded) {
+      localSimMode = 'selected';
     }
 
     // If items were added, resolve any overlapping positions
@@ -573,14 +582,26 @@ export default function SimulationWorkspace({ token, user }) {
           return;
         }
       } else {
-        const me = currentParticipants.find((p) => p.userId === currentUserId) || currentParticipants[0];
-        const others = currentParticipants.filter((p) => p.userId !== me.userId);
-        pairings = others.map((other) => ({
-          agents: [
-            { userId: me.userId, name: me.name, bitName: me.bitName, role: 'agent1' },
-            { userId: other.userId, name: other.name, bitName: other.bitName, role: 'agent2' },
-          ],
-        }));
+        const me = currentParticipants.find((p) => p.userId === currentUserId);
+        if (me) {
+          // Current user is among participants — pair them with each other participant
+          const others = currentParticipants.filter((p) => p.userId !== me.userId);
+          pairings = others.map((other) => ({
+            agents: [
+              { userId: me.userId, name: me.name, bitName: me.bitName, role: 'agent1' },
+              { userId: other.userId, name: other.name, bitName: other.bitName, role: 'agent2' },
+            ],
+          }));
+        } else {
+          // Current user is NOT among participants — auto-add them as agent1
+          // and pair with each participant (e.g. "compare Jay and Sagar" → me vs Jay, me vs Sagar)
+          pairings = currentParticipants.map((other) => ({
+            agents: [
+              { userId: currentUserId, name: user.name, bitName: user.name, role: 'agent1' },
+              { userId: other.userId, name: other.name, bitName: other.bitName, role: 'agent2' },
+            ],
+          }));
+        }
       }
     }
 

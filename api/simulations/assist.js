@@ -93,7 +93,7 @@ const tools = [
     type: 'function',
     function: {
       name: 'set_simulation_mode',
-      description: 'Configure the simulation run mode. Use "all_users" to set up 1-on-1 pairings between the requesting user and every other user in the database (parallel universes). Use "selected" to run with only the participants currently placed in the world. This does NOT start the simulation — the user will review the setup and click Start when ready.',
+      description: 'Configure the simulation run mode. Use "selected" when the user names specific people to simulate with (this runs ONLY with participants added via add_participant). Use "all_users" ONLY when the user explicitly asks to match with everyone in the database. If specific participants were added by name, you MUST use "selected". This does NOT start the simulation — the user will review the setup and click Start when ready.',
       parameters: {
         type: 'object',
         properties: {
@@ -172,8 +172,11 @@ YOUR ROLE:
   * Think about spatial relationships: put the bar near the entrance (left side), seating in the center, dance floor on the right, etc.
   * NEVER place multiple items at the same or very similar coordinates.
 - Keep your text response brief (1-2 sentences). After configuring, remind the user they can drag items around or make changes, then click Start.
-- If the user wants to test many people or find the best match, use set_simulation_mode with mode: "all_users" (this pairs them 1-on-1 with every user in the database).
-- If they want specific people to interact, add those participants with add_participant and use set_simulation_mode with mode: "selected".
+- CRITICAL RULE FOR SIMULATION MODE:
+  * If the user mentions ANY specific people by name (e.g. "simulate between Alice and Bob", "run a sim with John", "I'm choosing between Alice and Bob"), you MUST use set_simulation_mode with mode: "selected" and add ONLY those named users via add_participant. Do NOT use "all_users" when specific names are mentioned.
+  * ONLY use set_simulation_mode with mode: "all_users" when the user explicitly asks to match with everyone, all users, or find the best match from the whole pool (e.g. "match me with everyone", "test against all users", "find my best match from the database").
+  * When in doubt, default to "selected" mode — it is safer and respects the user's intent.
+- CRITICAL RULE FOR PARTICIPANT INTENT: When the user says they are "choosing between", "hesitating between", or "comparing" specific people, they want to see how EACH of those people interacts with THEMSELVES (the current user). Add those named people as participants — do NOT add the current user as a participant. The system will automatically pair the current user with each named participant. For example, "I'm hesitating between Jay and Sagar" means the user wants: (me vs Jay) and (me vs Sagar), NOT (Jay vs Sagar).
 - IMPORTANT: Always call the tools. Never just describe what you would do. But NEVER auto-start the simulation — only configure it.`;
 
   // Build conversation messages
