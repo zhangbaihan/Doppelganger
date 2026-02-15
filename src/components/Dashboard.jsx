@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import SimulationConfig from './SimulationConfig';
-import SimulationViewer from './SimulationViewer';
+import SimulationWorkspace from './SimulationWorkspace';
 
 const PROMPTS = [
   "Describe yourself however you'd like!",
@@ -55,6 +54,7 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
   const [inputText, setInputText] = useState('');
   const [error, setError] = useState(null);
   const [showPrompts, setShowPrompts] = useState(false);
+
   const [expandedScore, setExpandedScore] = useState(null);
   const [confidenceScores, setConfidenceScores] = useState(
     user.confidence_scores || {
@@ -88,12 +88,6 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
   const [kbEditValue, setKbEditValue] = useState('');
   const [addingKbEntry, setAddingKbEntry] = useState(null); // { cat, sub }
   const [kbAddValue, setKbAddValue] = useState('');
-
-  // Simulation state
-  const [simulations, setSimulations] = useState([]);
-  const [selectedSimulationId, setSelectedSimulationId] = useState(null);
-  const [showSimConfig, setShowSimConfig] = useState(false);
-  const [simRunning, setSimRunning] = useState(false);
 
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -219,68 +213,6 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
     saveUpdate({ knowledgeBase: kb }).catch(() => setError('Failed to save'));
   }
 
-  /* ── Simulation helpers ──────────────────────────────────────── */
-
-  async function loadSimulations() {
-    try {
-      const res = await fetch('/api/simulations', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSimulations(data.simulations || []);
-      }
-    } catch (err) {
-      console.error('Failed to load simulations:', err);
-    }
-  }
-
-  async function handleSimulationCreated(simulationId) {
-    setShowSimConfig(false);
-    setSelectedSimulationId(simulationId);
-    setSimRunning(true);
-
-    try {
-      const res = await fetch(`/api/simulations/${simulationId}/run`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Simulation failed');
-      }
-    } catch (err) {
-      console.error('Simulation run error:', err);
-      setError(err.message || 'Simulation failed');
-    } finally {
-      setSimRunning(false);
-      loadSimulations();
-    }
-  }
-
-  async function handleDeleteSimulation(simulationId, e) {
-    e.stopPropagation();
-    try {
-      const res = await fetch(`/api/simulations/${simulationId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        loadSimulations();
-        if (selectedSimulationId === simulationId) {
-          setSelectedSimulationId(null);
-        }
-      }
-    } catch (err) {
-      console.error('Delete simulation error:', err);
-    }
-  }
-
-  // Load simulations when switching to sim tab
-  useEffect(() => {
-    if (tab === 'sim') loadSimulations();
-  }, [tab]);
-
   // Load both transcript types when on Data tab (for Raw Transcripts sub-views)
   async function loadDataTabTranscripts() {
     try {
@@ -308,7 +240,6 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
   useEffect(() => {
     if (tab === 'data') loadDataTabTranscripts();
   }, [tab]);
-
   /* ── Recording ───────────────────────────────────────────────── */
 
   async function startRecording() {
@@ -348,8 +279,6 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
     }
   }
 
-  /* ── Send audio to backend ───────────────────────────────────── */
-
   function blobToBase64(blob) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -382,19 +311,40 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
 
       const data = await res.json();
 
+      // Update the last user message with server-confirmed text
+      // (important for audio transcription where we showed a placeholder)
+      if (data.userMessage) {
+        setMessages((prev) => {
+          const updated = [...prev];
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].role === 'user') {
+              updated[i] = { role: 'user', text: data.userMessage };
+              break;
+            }
+          }
+          return updated;
+        });
+      }
+
       if (data.type === 'freestyle') {
         setConversationStarterPrompt(null);
-        setMessages((prev) => [
-          ...prev,
-          { role: 'user', text: data.userMessage },
-          { role: 'assistant', text: data.agentResponse || '' },
-        ]);
+        // Add assistant response (user message already shown optimistically)
+        if (data.agentResponse) {
+          setMessages((prev) => [
+            ...prev,
+            { role: 'assistant', text: data.agentResponse },
+          ]);
+        }
         if (data.confidenceScores) setConfidenceScores(data.confidenceScores);
         if (data.confidenceReasoning) setConfidenceReasoning(data.confidenceReasoning);
         if (data.confidenceSuggestions) setConfidenceSuggestions(data.confidenceSuggestions);
         if (data.knowledgeBase) setKnowledgeBase(data.knowledgeBase);
       } else {
-        setMessages((prev) => [...prev, { role: 'user', text: data.userMessage }]);
+        // Training mode: show confirmation so user knows input was processed
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', text: `Noted! ${user.bit_name}'s knowledge base has been updated.` },
+        ]);
         setConfidenceScores(data.confidenceScores || confidenceScores);
         setConfidenceReasoning(data.confidenceReasoning);
         setConfidenceSuggestions(data.confidenceSuggestions);
@@ -418,6 +368,8 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
 
   async function sendAudio(blob) {
     const base64 = await blobToBase64(blob);
+    // Show placeholder immediately so the user sees something
+    setMessages((prev) => [...prev, { role: 'user', text: '(transcribing voice...)' }]);
     const body = { audio: base64, type: chatMode };
     if (chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt) {
       body.initialPrompt = conversationStarterPrompt;
@@ -429,6 +381,8 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
     const trimmed = inputText.trim();
     if (!trimmed || isProcessing) return;
     setInputText('');
+    // Show user message immediately so it doesn't "disappear"
+    setMessages((prev) => [...prev, { role: 'user', text: trimmed }]);
     const body = { text: trimmed, type: chatMode };
     if (chatMode === 'freestyle' && messages.length === 0 && conversationStarterPrompt) {
       body.initialPrompt = conversationStarterPrompt;
@@ -566,6 +520,29 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
   }
 
   /* ── Render ──────────────────────────────────────────────────── */
+
+  /* Full-width simulation view */
+  if (tab === 'sim') {
+    return (
+      <div className="dashboard dashboard-sim">
+        <div className="dashboard-top-bar">
+          <div className="tab-nav">
+            {TABS.map(({ id, label }) => (
+              <button
+                key={id}
+                className={`tab-btn ${tab === id ? 'active' : ''}`}
+                onClick={() => setTab(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button className="logout-btn" onClick={onLogout}>LOGOUT</button>
+        </div>
+        <SimulationWorkspace token={token} user={user} />
+      </div>
+    );
+  }
 
   return (
     <div className="dashboard">
@@ -1065,113 +1042,6 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
         </>
       )}
 
-      {/* ═══ SIMULATION TAB ═══ */}
-      {tab === 'sim' && (
-        <>
-          {showSimConfig ? (
-            <>
-              <SimulationConfig
-                token={token}
-                currentUser={user}
-                onSimulationCreated={handleSimulationCreated}
-              />
-              <button
-                className="back-btn"
-                onClick={() => setShowSimConfig(false)}
-              >
-                Back to Simulations
-              </button>
-            </>
-          ) : selectedSimulationId ? (
-            <>
-              {simRunning ? (
-                <div className="sim-running-indicator">
-                  <div className="processing-dots">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <p className="sim-running-text">
-                    Running simulation... This may take a minute.
-                  </p>
-                </div>
-              ) : (
-                <SimulationViewer
-                  token={token}
-                  simulationId={selectedSimulationId}
-                />
-              )}
-              <button
-                className="back-btn"
-                onClick={() => {
-                  setSelectedSimulationId(null);
-                  loadSimulations();
-                }}
-              >
-                Back to Simulations
-              </button>
-            </>
-          ) : (
-            <div className="simulations-list">
-              <div className="simulations-header">
-                <h3 className="section-title" style={{ margin: 0 }}>
-                  SIMULATIONS
-                </h3>
-                <button
-                  className="config-submit-btn"
-                  onClick={() => setShowSimConfig(true)}
-                >
-                  + NEW SIMULATION
-                </button>
-              </div>
-              {simulations.length === 0 ? (
-                <div className="simulations-empty">
-                  <p>No simulations yet. Create one to get started!</p>
-                </div>
-              ) : (
-                <div className="simulations-grid">
-                  {simulations.map((sim) => (
-                    <div
-                      key={sim.id}
-                      className="simulation-card"
-                      onClick={() => {
-                        setSelectedSimulationId(Number(sim.id));
-                        setShowSimConfig(false);
-                      }}
-                    >
-                      <div className="sim-card-header">
-                        <h4>{sim.name || 'Untitled Simulation'}</h4>
-                        <button
-                          className="sim-delete-btn"
-                          onClick={(e) =>
-                            handleDeleteSimulation(Number(sim.id), e)
-                          }
-                          title="Delete simulation"
-                        >
-                          ×
-                        </button>
-                      </div>
-                      <div className="sim-status">
-                        Status:{' '}
-                        <span className={`status-${sim.status}`}>
-                          {sim.status}
-                        </span>
-                      </div>
-                      <div className="sim-meta">
-                        {sim.num_simulations} simulation
-                        {Number(sim.num_simulations) !== 1 ? 's' : ''}
-                      </div>
-                      <div className="sim-date">
-                        {new Date(sim.created_at).toLocaleDateString()}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
     </div>
   );
 }

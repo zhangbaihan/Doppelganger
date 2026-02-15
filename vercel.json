@@ -2,10 +2,13 @@
   "framework": "vite",
   "functions": {
     "api/chat/message.js": {
-      "maxDuration": 60
+      "maxDuration": 300
     },
-    "api/simulations/[id]/run.js": {
-      "maxDuration": 60
+    "api/simulations/assist.js": {
+      "maxDuration": 300
+    },
+    "api/simulations/step.js": {
+      "maxDuration": 300
     }
   }
 }
