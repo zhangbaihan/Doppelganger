@@ -156,6 +156,17 @@ export async function initDb() {
     )
   `);
 
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS transcripts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      transcript_type TEXT NOT NULL,
+      messages TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // Migrations: add columns if missing
   const migrations = [
     `ALTER TABLE users ADD COLUMN profile_data TEXT DEFAULT NULL`,
@@ -238,6 +249,43 @@ export async function addConversation(userId, userMessage, agentResponse, conver
     sql: 'INSERT INTO conversations (user_id, user_message, agent_response, conversation_type) VALUES (?, ?, ?, ?)',
     args: [userId, userMessage, agentResponse, conversationType],
   });
+}
+
+/* ── Transcripts (saved conversation snapshots) ───────────────────── */
+
+export async function createTranscript(userId, name, transcriptType, messages) {
+  const db = await initDb();
+  const result = await db.execute({
+    sql: 'INSERT INTO transcripts (user_id, name, transcript_type, messages) VALUES (?, ?, ?, ?)',
+    args: [userId, name, transcriptType, JSON.stringify(messages)],
+  });
+  return Number(result.lastInsertRowid);
+}
+
+/** @param {'freestyle'|'training'} type */
+export async function getTranscriptsByUserId(userId, type = null) {
+  const db = await initDb();
+  if (type) {
+    const result = await db.execute({
+      sql: 'SELECT id, user_id, name, transcript_type, created_at FROM transcripts WHERE user_id = ? AND transcript_type = ? ORDER BY created_at DESC',
+      args: [userId, type],
+    });
+    return result.rows;
+  }
+  const result = await db.execute({
+    sql: 'SELECT id, user_id, name, transcript_type, created_at FROM transcripts WHERE user_id = ? ORDER BY created_at DESC',
+    args: [userId],
+  });
+  return result.rows;
+}
+
+export async function getTranscriptById(id, userId) {
+  const db = await initDb();
+  const result = await db.execute({
+    sql: 'SELECT * FROM transcripts WHERE id = ? AND user_id = ?',
+    args: [id, userId],
+  });
+  return result.rows[0] || null;
 }
 
 export async function getAllUsers() {

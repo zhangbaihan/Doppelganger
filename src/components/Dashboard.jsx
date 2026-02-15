@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import SimulationWorkspace from './SimulationWorkspace';
-import SimulationConfig from './SimulationConfig';
-import SimulationViewer from './SimulationViewer';
 import PlaygroundViewer from './PlaygroundViewer';
 
 const PROMPTS = [
@@ -79,6 +77,9 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
   const [dataView, setDataView] = useState('kb');
   const [rawTranscriptType, setRawTranscriptType] = useState('training'); // 'freestyle' | 'training'
   const [conversationStarterPrompt, setConversationStarterPrompt] = useState(null); // Bit's first message when conversation is empty
+  const [savedTranscriptsFreestyle, setSavedTranscriptsFreestyle] = useState([]);
+  const [savedTranscriptsTraining, setSavedTranscriptsTraining] = useState([]);
+  const [openedTranscript, setOpenedTranscript] = useState(null); // { id, name, type, messages }
 
   // Editing states
   const [editingProfile, setEditingProfile] = useState(false);
@@ -225,33 +226,141 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
     saveUpdate({ knowledgeBase: kb }).catch(() => setError('Failed to save'));
   }
 
-  // Load both transcript types when on Data tab (for Raw Transcripts sub-views)
-  async function loadDataTabTranscripts() {
+  /* ── Simulation helpers ──────────────────────────────────────── */
+
+  async function loadSimulations() {
+    try {
+      const res = await fetch('/api/simulations', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSimulations(data.simulations || []);
+      }
+    } catch (err) {
+      console.error('Failed to load simulations:', err);
+    }
+  }
+
+  async function handleSimulationCreated(simulationId) {
+    setShowSimConfig(false);
+    setSelectedSimulationId(simulationId);
+    setSimRunning(true);
+
+    try {
+      const res = await fetch(`/api/simulations/${simulationId}/run`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Simulation failed');
+      }
+    } catch (err) {
+      console.error('Simulation run error:', err);
+      setError(err.message || 'Simulation failed');
+    } finally {
+      setSimRunning(false);
+      loadSimulations();
+    }
+  }
+
+  async function handleDeleteSimulation(simulationId, e) {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/simulations/${simulationId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        loadSimulations();
+        if (selectedSimulationId === simulationId) {
+          setSelectedSimulationId(null);
+        }
+      }
+    } catch (err) {
+      console.error('Delete simulation error:', err);
+    }
+  }
+
+  // Load simulations when switching to sim tab
+  useEffect(() => {
+    if (tab === 'sim') loadSimulations();
+  }, [tab]);
+
+  // Load saved transcripts (list only) when on Data tab
+  async function loadSavedTranscripts() {
     try {
       const [trainRes, freeRes] = await Promise.all([
-        fetch('/api/chat/history?type=training', {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch('/api/chat/history?type=freestyle', {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
+        fetch('/api/transcripts?type=training', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/transcripts?type=freestyle', { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       if (trainRes.ok) {
         const data = await trainRes.json();
-        setAllTrainingData(data.conversations || []);
+        setSavedTranscriptsTraining(data.transcripts || []);
       }
       if (freeRes.ok) {
         const data = await freeRes.json();
-        setAllFreestyleData(data.conversations || []);
+        setSavedTranscriptsFreestyle(data.transcripts || []);
       }
     } catch (err) {
-      console.error('Failed to load transcripts:', err);
+      console.error('Failed to load saved transcripts:', err);
+    }
+  }
+
+  async function openTranscript(id) {
+    try {
+      const res = await fetch(`/api/transcripts/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setOpenedTranscript({
+        id: data.id,
+        name: data.name,
+        type: data.type,
+        messages: data.messages || [],
+      });
+    } catch (err) {
+      console.error('Failed to open transcript:', err);
+    }
+  }
+
+  async function handleClearAndSave() {
+    if (messages.length === 0 || isProcessing) return;
+    try {
+      const res = await fetch('/api/transcripts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ messages, type: chatMode }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to save');
+      }
+      setMessages([]);
+      if (chatMode === 'freestyle') {
+        setConversationStarterPrompt(PROMPTS[Math.floor(Math.random() * PROMPTS.length)]);
+      }
+      setError(null);
+      loadSavedTranscripts();
+    } catch (err) {
+      console.error('Clear & Save error:', err);
+      setError(err.message || 'Failed to save transcript');
     }
   }
 
   useEffect(() => {
-    if (tab === 'data') loadDataTabTranscripts();
+    if (tab === 'data') loadSavedTranscripts();
   }, [tab]);
+
+  useEffect(() => {
+    if (dataView !== 'raw') setOpenedTranscript(null);
+  }, [dataView]);
+
   /* ── Recording ───────────────────────────────────────────────── */
 
   async function startRecording() {
@@ -738,13 +847,24 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
                 <span className="processing-text">Processing...</span>
               </div>
             ) : (
-              <button
-                className={`record-btn ${isRecording ? 'recording' : ''}`}
-                onClick={isRecording ? stopRecording : startRecording}
-              >
-                <div className="record-icon" />
-                <span>{isRecording ? 'STOP' : 'RECORD'}</span>
-              </button>
+              <div className="record-controls-row">
+                <button
+                  className={`record-btn ${isRecording ? 'recording' : ''}`}
+                  onClick={isRecording ? stopRecording : startRecording}
+                >
+                  <div className="record-icon" />
+                  <span>{isRecording ? 'STOP' : 'RECORD'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="clear-save-btn"
+                  onClick={handleClearAndSave}
+                  disabled={messages.length === 0}
+                  title="Save this conversation and start fresh"
+                >
+                  CLEAR & SAVE
+                </button>
+              </div>
             )}
             <div className="chat-input-row">
               <input
@@ -989,82 +1109,76 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
             </div>
           )}
 
-          {/* Raw Transcripts: Conversation and Training sub-tabs */}
+          {/* Saved Transcripts: list of "files" + open one to view */}
           {dataView === 'raw' && (
-            <div className="training-data-section">
+            <div className="training-data-section transcripts-page">
               <div className="raw-transcript-sub-nav">
                 <button
                   className={`data-sub-btn ${rawTranscriptType === 'freestyle' ? 'active' : ''}`}
-                  onClick={() => setRawTranscriptType('freestyle')}
+                  onClick={() => {
+                    setRawTranscriptType('freestyle');
+                    setOpenedTranscript(null);
+                  }}
                 >
                   CONVERSATION
                 </button>
                 <button
                   className={`data-sub-btn ${rawTranscriptType === 'training' ? 'active' : ''}`}
-                  onClick={() => setRawTranscriptType('training')}
+                  onClick={() => {
+                    setRawTranscriptType('training');
+                    setOpenedTranscript(null);
+                  }}
                 >
                   TRAINING
                 </button>
               </div>
-              {rawTranscriptType === 'freestyle' && (
-                <>
-                  <p className="section-desc">
-                    {allFreestyleData.length === 0
-                      ? 'No conversations yet.'
-                      : `${allFreestyleData.length} conversation${allFreestyleData.length !== 1 ? 's' : ''}`}
-                  </p>
-                  <div className="training-data-list">
-                    {allFreestyleData.map((entry, i) => (
-                      <div key={i} className="training-data-item transcript-freestyle">
-                        <div className="training-data-meta">
-                          <span className="training-data-num">#{i + 1}</span>
-                          <span className="training-data-time">
-                            {new Date(entry.created_at).toLocaleDateString(
-                              undefined,
-                              {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              }
-                            )}
-                          </span>
-                        </div>
-                        <p className="training-data-text training-data-user">{entry.user_message}</p>
-                        {entry.agent_response && (
-                          <p className="training-data-text training-data-agent">{entry.agent_response}</p>
-                        )}
+              {openedTranscript ? (
+                <div className="transcript-detail">
+                  <div className="transcript-detail-header">
+                    <button type="button" className="transcript-back-btn" onClick={() => setOpenedTranscript(null)}>
+                      ← BACK TO LIST
+                    </button>
+                    <h4 className="transcript-detail-title">{openedTranscript.name}</h4>
+                  </div>
+                  <div className="transcript-detail-messages">
+                    {openedTranscript.messages.map((msg, i) => (
+                      <div key={i} className={`chat-msg ${msg.role === 'assistant' ? 'agent' : 'user'}`}>
+                        <span className="msg-author">{msg.role === 'assistant' ? user.bit_name?.toUpperCase() : 'YOU'}</span>
+                        <p className="msg-text">{msg.text}</p>
                       </div>
                     ))}
                   </div>
-                </>
-              )}
-              {rawTranscriptType === 'training' && (
+                </div>
+              ) : (
                 <>
                   <p className="section-desc">
-                    {allTrainingData.length === 0
-                      ? 'No training data yet. Record your first session!'
-                      : `${allTrainingData.length} training session${allTrainingData.length !== 1 ? 's' : ''} stored`}
+                    {rawTranscriptType === 'freestyle'
+                      ? (savedTranscriptsFreestyle.length === 0
+                          ? 'No saved conversations yet. Use "Clear & Save" on the Train tab to save one.'
+                          : `${savedTranscriptsFreestyle.length} saved conversation${savedTranscriptsFreestyle.length !== 1 ? 's' : ''}`)
+                      : (savedTranscriptsTraining.length === 0
+                          ? 'No saved training sessions yet. Use "Clear & Save" on the Train tab to save one.'
+                          : `${savedTranscriptsTraining.length} saved training session${savedTranscriptsTraining.length !== 1 ? 's' : ''}`)}
                   </p>
-                  <div className="training-data-list">
-                    {allTrainingData.map((entry, i) => (
-                      <div key={i} className="training-data-item">
-                        <div className="training-data-meta">
-                          <span className="training-data-num">#{i + 1}</span>
-                          <span className="training-data-time">
-                            {new Date(entry.created_at).toLocaleDateString(
-                              undefined,
-                              {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              }
-                            )}
-                          </span>
-                        </div>
-                        <p className="training-data-text">{entry.user_message}</p>
-                      </div>
+                  <div className="transcript-file-list">
+                    {(rawTranscriptType === 'freestyle' ? savedTranscriptsFreestyle : savedTranscriptsTraining).map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className="transcript-file-row"
+                        onClick={() => openTranscript(t.id)}
+                      >
+                        <span className="transcript-file-name">{t.name}</span>
+                        <span className="transcript-file-date">
+                          {new Date(t.created_at).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </button>
                     ))}
                   </div>
                 </>
