@@ -10,17 +10,22 @@ export default apiHandler(async (req, res) => {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { credential } = req.body;
+  const { credential } = req.body || {};
   if (!credential) {
     return res.status(400).json({ error: 'Missing credential' });
   }
 
-  const ticket = await googleClient.verifyIdToken({
-    idToken: credential,
-    audience: process.env.GOOGLE_CLIENT_ID,
-  });
-
-  const payload = ticket.getPayload();
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    payload = ticket.getPayload();
+  } catch (err) {
+    console.error('Google token verification failed:', err.message);
+    return res.status(401).json({ error: 'Invalid Google credential' });
+  }
 
   let user = await getUserByGoogleId(payload.sub);
   if (!user) {

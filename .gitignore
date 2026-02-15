@@ -3,3 +3,5 @@ dist/
 .env
 *.db
 uploads/
+.vercel
+.env*.local

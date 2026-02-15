@@ -41,6 +41,16 @@ export async function initDb() {
     )
   `);
 
+  // Migrations: add columns if missing
+  const migrations = [
+    `ALTER TABLE users ADD COLUMN profile_data TEXT DEFAULT NULL`,
+    `ALTER TABLE users ADD COLUMN confidence_reasoning TEXT DEFAULT NULL`,
+    `ALTER TABLE users ADD COLUMN knowledge_base TEXT DEFAULT NULL`,
+  ];
+  for (const sql of migrations) {
+    try { await db.execute(sql); } catch { /* already exists */ }
+  }
+
   _initialized = true;
   return db;
 }
@@ -115,5 +125,8 @@ export function parseUser(user) {
       user.confidence_scores ||
         '{"identity_resolution":0,"behavioral_specificity":0,"emotional_resolution":0,"social_pattern_clarity":0}'
     ),
+    profile_data: JSON.parse(user.profile_data || 'null'),
+    confidence_reasoning: JSON.parse(user.confidence_reasoning || 'null'),
+    knowledge_base: JSON.parse(user.knowledge_base || 'null'),
   };
 }

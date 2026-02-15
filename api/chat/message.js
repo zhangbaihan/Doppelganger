@@ -10,80 +10,157 @@ import { apiHandler } from '../_lib/handler.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-/* ── Initial training questions ──────────────────────────────────── */
+/* ── Empty knowledge base scaffold ───────────────────────────────── */
 
-const INITIAL_QUESTIONS = [
-  "What's your age?",
-  'How do you identify in terms of gender?',
-  "Describe yourself however you'd like!",
-  'Walk me through a recent day that felt like a good day.',
-  "What do you usually do when you enter a room where you don't know anyone?",
-  'What kinds of conversations make you lose track of time?',
-  'What do you enjoy doing when you have nothing scheduled?',
-  "Tell me about something you've changed your mind about in the past few years.",
-  'What tends to annoy you more than it probably should?',
-  'How do you usually show someone you appreciate them?',
-  'Are there things that people often misunderstand about you?',
-  'When you feel stressed, what do you typically do?',
-  'What makes you feel most energized?',
-  'What makes you feel drained?',
-  "What's a small thing that reliably makes your day better?",
-];
+const EMPTY_KB = {
+  identity: {
+    values_and_beliefs: [],
+    self_concept: [],
+    worldview: [],
+  },
+  behaviors: {
+    habits_and_routines: [],
+    situational_reactions: [],
+    decision_patterns: [],
+  },
+  emotions: {
+    triggers_and_sensitivities: [],
+    regulation_style: [],
+    emotional_vocabulary: [],
+  },
+  social: {
+    conflict_style: [],
+    relationship_patterns: [],
+    group_dynamics: [],
+  },
+  preferences: {
+    likes: [],
+    dislikes: [],
+    tastes: [],
+  },
+  life_context: [],
+  key_anecdotes: [],
+};
 
 /* ── System prompt builder ───────────────────────────────────────── */
 
-function buildSystemPrompt(user, questionsCovered, confidenceScores, history) {
-  const historyStr = history
-    .map((c) => `User: ${c.user_message}\n${user.bit_name}: ${c.agent_response}`)
-    .join('\n\n');
+function buildSystemPrompt(user, knowledgeBase) {
+  const profileData = JSON.parse(user.profile_data || '{}');
 
-  const questionsStr = INITIAL_QUESTIONS.map(
-    (q, i) => `${i}: ${q}${questionsCovered.includes(i) ? ' [COVERED]' : ''}`
-  ).join('\n');
+  const profileStr = [
+    `Name: ${user.name}`,
+    profileData.age ? `Age: ${profileData.age}` : '',
+    profileData.gender_identity
+      ? `Gender identity: ${profileData.gender_identity}`
+      : '',
+    profileData.race ? `Race: ${profileData.race}` : '',
+    profileData.height ? `Height: ${profileData.height}` : '',
+    profileData.sexual_orientation
+      ? `Sexual orientation: ${profileData.sexual_orientation}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 
-  return `You are ${user.bit_name}, an AI agent being trained to be ${user.name}'s digital doppelganger. Your job is to learn everything about ${user.name} so you can eventually represent them accurately.
+  const kbStr = JSON.stringify(knowledgeBase, null, 2);
 
-RULES:
-- Respond ONLY in text. You never speak aloud.
-- Be warm, curious, and encouraging — but concise.
-- Show you are actively learning and remembering what the user tells you.
-- Reference things the user said before to demonstrate memory.
-- Ask follow-up questions sparingly — the user is here to tell you about themselves.
+  return `You are a silent training processor for ${user.bit_name}, an AI doppelganger being trained to fully represent ${user.name}.
 
-${historyStr ? `FULL CONVERSATION HISTORY:\n${historyStr}\n` : ''}
+KNOWN PROFILE:
+${profileStr}
+
+ROLE:
+- You are NOT a conversational agent. You NEVER speak back.
+- The user is speaking freely — sharing anything about themselves.
+- Your job is to (1) extract structured insights from the new input, (2) merge them into the knowledge base, and (3) recompute confidence scores.
+- You produce NO text response. The "response" field must always be "".
+
+CURRENT STRUCTURED KNOWLEDGE BASE:
+${kbStr}
+
+The knowledge base above is what ${user.bit_name} currently "knows" about ${user.name}. It was built from all previous training sessions.
+
+You will receive a new transcription from the user. You must:
+
+1. EXTRACT new insights from this transcription.
+2. MERGE them into the existing knowledge base — adding new entries, consolidating duplicates, updating contradictions, refining vague entries into more specific ones.
+3. COMPUTE confidence scores based on the UPDATED knowledge base.
 
 You MUST respond with valid JSON using this exact structure:
 {
-  "response": "Your natural, conversational text response.",
-  "questions_covered": [array of integer indices 0–14 for all initial training questions adequately covered across ALL conversations so far],
+  "response": "",
+  "knowledge_base": {
+    "identity": {
+      "values_and_beliefs": ["concise insight", ...],
+      "self_concept": ["concise insight", ...],
+      "worldview": ["concise insight", ...]
+    },
+    "behaviors": {
+      "habits_and_routines": ["concise insight", ...],
+      "situational_reactions": ["concise insight", ...],
+      "decision_patterns": ["concise insight", ...]
+    },
+    "emotions": {
+      "triggers_and_sensitivities": ["concise insight", ...],
+      "regulation_style": ["concise insight", ...],
+      "emotional_vocabulary": ["concise insight", ...]
+    },
+    "social": {
+      "conflict_style": ["concise insight", ...],
+      "relationship_patterns": ["concise insight", ...],
+      "group_dynamics": ["concise insight", ...]
+    },
+    "preferences": {
+      "likes": ["concise insight", ...],
+      "dislikes": ["concise insight", ...],
+      "tastes": ["concise insight", ...]
+    },
+    "life_context": ["concise insight", ...],
+    "key_anecdotes": ["brief summary of a revealing story/example", ...]
+  },
   "confidence_scores": {
     "identity_resolution": <number 0–100>,
     "behavioral_specificity": <number 0–100>,
     "emotional_resolution": <number 0–100>,
     "social_pattern_clarity": <number 0–100>
+  },
+  "confidence_reasoning": {
+    "identity_resolution": "<1-3 sentence explanation>",
+    "behavioral_specificity": "<1-3 sentence explanation>",
+    "emotional_resolution": "<1-3 sentence explanation>",
+    "social_pattern_clarity": "<1-3 sentence explanation>"
+  },
+  "confidence_suggestions": {
+    "identity_resolution": "<1 concrete suggestion>",
+    "behavioral_specificity": "<1 concrete suggestion>",
+    "emotional_resolution": "<1 concrete suggestion>",
+    "social_pattern_clarity": "<1 concrete suggestion>"
   }
 }
 
-INITIAL TRAINING QUESTIONS (indices 0–14):
-${questionsStr}
+RULES FOR knowledge_base:
+- Each entry should be a CONCISE, structured insight — not raw quotes. Transform rambling speech into clear, specific knowledge.
+- Example: raw "I dunno I guess when people are rude I kinda just walk away" → structured insight: "Tends to disengage/walk away from rude people rather than confront"
+- Consolidate: if the user repeats or elaborates on something already in the KB, update the existing entry to be more nuanced — don't duplicate.
+- Contradict: if the user says something that contradicts an existing entry, update or replace it.
+- key_anecdotes: store brief (1-2 sentence) summaries of specific stories or examples that reveal personality. These are gold for behavioral prediction.
+- Keep entries concise (under 20 words each when possible).
 
-RULES FOR questions_covered:
-- Include ALL questions adequately addressed across the ENTIRE conversation history, not just this message.
-- A question is "covered" only if the user has genuinely, substantively addressed its topic — not merely mentioned it in passing.
-- Previously covered questions (marked [COVERED]) must remain in the array unless the user explicitly contradicts or retracts their answer.
+RULES FOR confidence_scores:
+These represent predictive power over NOVEL situations, not information collected.
 
-RULES FOR confidence_scores — READ CAREFULLY:
-These scores represent your confidence at PREDICTING what ${user.name} would do, say, think, or feel in situations you have NOT explicitly discussed. This is about predictive power over novel situations, not how much information you have collected.
+- Identity Resolution (0–100): Predict values, self-concept, reactions in novel situations. Start 2–10%.
+- Behavioral Specificity (0–100): Predict specific behaviors in new contexts. Requires concrete examples. Start 1–8%.
+- Emotional Resolution (0–100): Predict emotional reactions. Requires deep emotional data. Start 1–6%.
+- Social Pattern Clarity (0–100): Predict social behavior in undiscussed situations. Hardest domain. Start 0–4%.
 
-- Identity Resolution (0–100): Can you predict their values, self-concept, and reactions in novel situations? After basic demographics and a self-description, this should still be very low (5–15%) because knowing someone's age and gender gives nearly zero predictive power about their identity.
+Scores above 40% should be rare. Be brutally honest.
 
-- Behavioral Specificity (0–100): Do you have enough concrete, situational examples to predict SPECIFIC behaviors in new contexts? Vague statements like "I'm chill" contribute almost nothing. Only detailed stories with actions and reactions meaningfully move this score. Start extremely low (2–10%).
+RULES FOR confidence_reasoning:
+- Explain what you know, what patterns you've found, what gaps remain. Reference themes from the knowledge base.
 
-- Emotional Resolution (0–100): Can you predict emotional reactions to novel situations? Do you understand their emotional vocabulary, regulation style, and triggers? This requires deep emotional data. Start very low (2–8%).
-
-- Social Pattern Clarity (0–100): Can you predict how they would handle social situations you have not discussed — conflict style, intimacy patterns, group dynamics? This is the hardest domain to predict. Start extremely low (1–5%).
-
-After initial training (all 15 questions covered), typical total scores should be in the 5–25% range per domain. Scores above 50% should be rare and require extensive, detailed training data across many sessions. Do NOT inflate scores to encourage the user — be brutally honest about your predictive limitations.`;
+RULES FOR confidence_suggestions:
+- Give ONE specific, actionable thing the user could talk about to increase each score. Be concrete, not generic.`;
 }
 
 /* ── Handler ─────────────────────────────────────────────────────── */
@@ -113,16 +190,16 @@ export default apiHandler(async (req, res) => {
 
   const userMessage = transcription.text;
   if (!userMessage || !userMessage.trim()) {
-    return res.status(400).json({ error: 'Could not transcribe audio. Try speaking more clearly.' });
+    return res
+      .status(400)
+      .json({ error: 'Could not transcribe audio. Try speaking more clearly.' });
   }
 
-  // Gather context
-  const history = await getConversations(Number(user.id));
-  const questionsCovered = JSON.parse(user.questions_covered || '[]');
-  const confidenceScores = JSON.parse(user.confidence_scores || '{}');
+  // Current knowledge base (or empty scaffold)
+  const knowledgeBase = JSON.parse(user.knowledge_base || 'null') || EMPTY_KB;
 
   // Build prompt & call GPT-4o
-  const systemPrompt = buildSystemPrompt(user, questionsCovered, confidenceScores, history);
+  const systemPrompt = buildSystemPrompt(user, knowledgeBase);
 
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o',
@@ -136,24 +213,29 @@ export default apiHandler(async (req, res) => {
 
   const result = JSON.parse(completion.choices[0].message.content);
 
-  // Merge & persist
-  const newQuestionsCovered = result.questions_covered || questionsCovered;
-  const newConfidenceScores = result.confidence_scores || confidenceScores;
-  const isTrained = newQuestionsCovered.length >= INITIAL_QUESTIONS.length;
+  const newKnowledgeBase = result.knowledge_base || knowledgeBase;
+  const newConfidenceScores = result.confidence_scores || {};
+  const newConfidenceReasoning = result.confidence_reasoning || null;
+  const newConfidenceSuggestions = result.confidence_suggestions || null;
 
   await updateUser(Number(user.id), {
-    questions_covered: JSON.stringify(newQuestionsCovered),
+    knowledge_base: JSON.stringify(newKnowledgeBase),
     confidence_scores: JSON.stringify(newConfidenceScores),
-    is_trained: isTrained ? 1 : 0,
+    confidence_reasoning: JSON.stringify({
+      reasoning: newConfidenceReasoning,
+      suggestions: newConfidenceSuggestions,
+    }),
   });
 
-  await addConversation(Number(user.id), userMessage, result.response);
+  // Store raw transcription for Training Data view
+  await addConversation(Number(user.id), userMessage, '');
 
   res.json({
     userMessage,
-    agentResponse: result.response,
-    questionsCovered: newQuestionsCovered,
+    agentResponse: '',
     confidenceScores: newConfidenceScores,
-    isTrained,
+    confidenceReasoning: newConfidenceReasoning,
+    confidenceSuggestions: newConfidenceSuggestions,
+    knowledgeBase: newKnowledgeBase,
   });
 });

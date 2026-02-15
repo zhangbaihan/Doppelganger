@@ -46,6 +46,12 @@ export default function App() {
     setUser((prev) => ({ ...prev, ...updatedFields }));
   }
 
+  function handleLogout() {
+    localStorage.removeItem('dg_token');
+    setToken(null);
+    setUser(null);
+  }
+
   if (loading) {
     return (
       <div className="app-loading">
@@ -58,9 +64,9 @@ export default function App() {
     return <Login onLogin={handleLogin} />;
   }
 
-  if (!user.bit_name) {
-    return <ProfileSetup token={token} user={user} onSetup={handleProfileSetup} />;
+  if (!user.bit_name || !user.profile_data) {
+    return <ProfileSetup token={token} user={user} onSetup={handleProfileSetup} onLogout={handleLogout} />;
   }
 
-  return <Dashboard token={token} user={user} onUserUpdate={handleUserUpdate} />;
+  return <Dashboard token={token} user={user} onUserUpdate={handleUserUpdate} onLogout={handleLogout} />;
 }

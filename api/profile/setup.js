@@ -10,12 +10,30 @@ export default apiHandler(async (req, res) => {
   const decoded = verifyToken(req.headers.authorization);
   if (!decoded) return res.status(401).json({ error: 'Unauthorized' });
 
-  const { bitName } = req.body;
+  const { bitName, realName, age, genderIdentity, race, height, sexualOrientation } =
+    req.body || {};
+
   if (!bitName || !bitName.trim()) {
     return res.status(400).json({ error: 'Bit name is required' });
   }
+  if (!realName || !realName.trim()) {
+    return res.status(400).json({ error: 'Real name is required' });
+  }
 
-  await updateUser(decoded.userId, { bit_name: bitName.trim() });
+  const profileData = JSON.stringify({
+    age: age || '',
+    gender_identity: genderIdentity || '',
+    race: race || '',
+    height: height || '',
+    sexual_orientation: sexualOrientation || '',
+  });
+
+  await updateUser(decoded.userId, {
+    bit_name: bitName.trim(),
+    name: realName.trim(),
+    profile_data: profileData,
+  });
+
   const user = await getUserById(decoded.userId);
   res.json({ user: parseUser(user) });
 });

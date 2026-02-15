@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 
-const INITIAL_QUESTIONS = [
-  "What's your age?",
-  'How do you identify in terms of gender?',
+const PROMPTS = [
   "Describe yourself however you'd like!",
   'Walk me through a recent day that felt like a good day.',
   "What do you usually do when you enter a room where you don't know anyone?",
@@ -25,14 +23,28 @@ const SCORE_DOMAINS = [
   { key: 'social_pattern_clarity', label: 'Social Pattern Clarity' },
 ];
 
-export default function Dashboard({ token, user, onUserUpdate }) {
+const TABS = [
+  { id: 'train', label: 'TRAIN' },
+  { id: 'data', label: 'TRAINING DATA' },
+];
+
+const PROFILE_FIELDS = [
+  { key: 'age', label: 'AGE' },
+  { key: 'height', label: 'HEIGHT' },
+  { key: 'gender_identity', label: 'GENDER IDENTITY' },
+  { key: 'race', label: 'RACE' },
+  { key: 'sexual_orientation', label: 'SEXUAL ORIENTATION' },
+];
+
+export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
+  const [tab, setTab] = useState('train');
   const [messages, setMessages] = useState([]);
+  const [allTrainingData, setAllTrainingData] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState(null);
-  const [questionsCovered, setQuestionsCovered] = useState(
-    user.questions_covered || []
-  );
+  const [showPrompts, setShowPrompts] = useState(false);
+  const [expandedScore, setExpandedScore] = useState(null);
   const [confidenceScores, setConfidenceScores] = useState(
     user.confidence_scores || {
       identity_resolution: 0,
@@ -41,7 +53,28 @@ export default function Dashboard({ token, user, onUserUpdate }) {
       social_pattern_clarity: 0,
     }
   );
-  const [isTrained, setIsTrained] = useState(!!user.is_trained);
+  const [confidenceReasoning, setConfidenceReasoning] = useState(
+    user.confidence_reasoning?.reasoning || null
+  );
+  const [confidenceSuggestions, setConfidenceSuggestions] = useState(
+    user.confidence_reasoning?.suggestions || null
+  );
+  const [knowledgeBase, setKnowledgeBase] = useState(
+    user.knowledge_base || null
+  );
+  const [dataView, setDataView] = useState('kb');
+
+  // Editing states
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileDraft, setProfileDraft] = useState({
+    name: user.name || '',
+    ...(user.profile_data || {}),
+  });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [editingKbEntry, setEditingKbEntry] = useState(null); // { cat, sub, idx }
+  const [kbEditValue, setKbEditValue] = useState('');
+  const [addingKbEntry, setAddingKbEntry] = useState(null); // { cat, sub }
+  const [kbAddValue, setKbAddValue] = useState('');
 
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -71,14 +104,86 @@ export default function Dashboard({ token, user, onUserUpdate }) {
       });
       if (!res.ok) return;
       const data = await res.json();
-      const history = data.conversations.flatMap((c) => [
-        { role: 'user', text: c.user_message },
-        { role: 'agent', text: c.agent_response },
-      ]);
+      const history = data.conversations.map((c) => ({
+        role: 'user',
+        text: c.user_message,
+      }));
       setMessages(history);
+      setAllTrainingData(data.conversations);
     } catch (err) {
       console.error('Failed to load history:', err);
     }
+  }
+
+  /* ── Save helpers ──────────────────────────────────────────────── */
+
+  async function saveUpdate(body) {
+    const res = await fetch('/api/profile/update', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error('Save failed');
+    const data = await res.json();
+    onUserUpdate(data.user);
+    return data.user;
+  }
+
+  async function saveProfile() {
+    setSavingProfile(true);
+    try {
+      const { name, ...profileFields } = profileDraft;
+      const updated = await saveUpdate({
+        name: name.trim(),
+        profileData: profileFields,
+      });
+      setEditingProfile(false);
+    } catch (err) {
+      setError('Failed to save profile');
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  function updateKbEntry(cat, sub, idx, newValue) {
+    const kb = JSON.parse(JSON.stringify(knowledgeBase));
+    if (sub) {
+      kb[cat][sub][idx] = newValue;
+    } else {
+      kb[cat][idx] = newValue;
+    }
+    setKnowledgeBase(kb);
+    saveUpdate({ knowledgeBase: kb }).catch(() => setError('Failed to save'));
+  }
+
+  function deleteKbEntry(cat, sub, idx) {
+    const kb = JSON.parse(JSON.stringify(knowledgeBase));
+    if (sub) {
+      kb[cat][sub].splice(idx, 1);
+    } else {
+      kb[cat].splice(idx, 1);
+    }
+    setKnowledgeBase(kb);
+    saveUpdate({ knowledgeBase: kb }).catch(() => setError('Failed to save'));
+  }
+
+  function addKbEntry(cat, sub, value) {
+    if (!value.trim()) return;
+    const kb = JSON.parse(JSON.stringify(knowledgeBase));
+    if (sub) {
+      if (!kb[cat][sub]) kb[cat][sub] = [];
+      kb[cat][sub].push(value.trim());
+    } else {
+      if (!kb[cat]) kb[cat] = [];
+      kb[cat].push(value.trim());
+    }
+    setKnowledgeBase(kb);
+    setAddingKbEntry(null);
+    setKbAddValue('');
+    saveUpdate({ knowledgeBase: kb }).catch(() => setError('Failed to save'));
   }
 
   /* ── Recording ───────────────────────────────────────────────── */
@@ -86,7 +191,9 @@ export default function Dashboard({ token, user, onUserUpdate }) {
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      const mediaRecorder = new MediaRecorder(stream, {
+        audioBitsPerSecond: 32000,
+      });
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
@@ -100,7 +207,7 @@ export default function Dashboard({ token, user, onUserUpdate }) {
         sendAudio(blob);
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(1000);
       setIsRecording(true);
     } catch (err) {
       console.error('Microphone error:', err);
@@ -120,18 +227,23 @@ export default function Dashboard({ token, user, onUserUpdate }) {
 
   /* ── Send audio to backend ───────────────────────────────────── */
 
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
   async function sendAudio(blob) {
     setIsProcessing(true);
     setError(null);
     try {
-      // Convert blob → base64 for serverless (no file system)
-      const arrayBuffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64 = btoa(binary);
+      const base64 = await blobToBase64(blob);
 
       const res = await fetch('/api/chat/message', {
         method: 'POST',
@@ -149,19 +261,20 @@ export default function Dashboard({ token, user, onUserUpdate }) {
 
       const data = await res.json();
 
-      setMessages((prev) => [
-        ...prev,
-        { role: 'user', text: data.userMessage },
-        { role: 'agent', text: data.agentResponse },
-      ]);
-
-      setQuestionsCovered(data.questionsCovered);
+      setMessages((prev) => [...prev, { role: 'user', text: data.userMessage }]);
       setConfidenceScores(data.confidenceScores);
+      setConfidenceReasoning(data.confidenceReasoning);
+      setConfidenceSuggestions(data.confidenceSuggestions);
+      if (data.knowledgeBase) setKnowledgeBase(data.knowledgeBase);
 
-      if (data.isTrained && !isTrained) {
-        setIsTrained(true);
-        onUserUpdate({ is_trained: 1 });
-      }
+      setAllTrainingData((prev) => [
+        ...prev,
+        {
+          user_message: data.userMessage,
+          agent_response: '',
+          created_at: new Date().toISOString(),
+        },
+      ]);
     } catch (err) {
       console.error('Send error:', err);
       setError(err.message || 'Something went wrong');
@@ -170,114 +283,539 @@ export default function Dashboard({ token, user, onUserUpdate }) {
     }
   }
 
+  /* ── KB item renderer ────────────────────────────────────────── */
+
+  function renderKbItems(items, category, subKey) {
+    if (!Array.isArray(items) || items.length === 0) return null;
+
+    const isAddingHere =
+      addingKbEntry &&
+      addingKbEntry.cat === category &&
+      addingKbEntry.sub === subKey;
+
+    return (
+      <div className="kb-subcategory">
+        {subKey && (
+          <span className="kb-sub-label">{subKey.replace(/_/g, ' ')}</span>
+        )}
+        <ul className="kb-items">
+          {items.map((item, j) => {
+            const isEditing =
+              editingKbEntry &&
+              editingKbEntry.cat === category &&
+              editingKbEntry.sub === subKey &&
+              editingKbEntry.idx === j;
+
+            return (
+              <li key={j} className="kb-item">
+                {isEditing ? (
+                  <div className="kb-edit-row">
+                    <input
+                      className="kb-edit-input"
+                      value={kbEditValue}
+                      onChange={(e) => setKbEditValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          updateKbEntry(category, subKey, j, kbEditValue);
+                          setEditingKbEntry(null);
+                        }
+                        if (e.key === 'Escape') setEditingKbEntry(null);
+                      }}
+                      autoFocus
+                    />
+                    <button
+                      className="kb-action-btn save"
+                      onClick={() => {
+                        updateKbEntry(category, subKey, j, kbEditValue);
+                        setEditingKbEntry(null);
+                      }}
+                    >
+                      ✓
+                    </button>
+                    <button
+                      className="kb-action-btn cancel"
+                      onClick={() => setEditingKbEntry(null)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <div className="kb-item-row">
+                    <span className="kb-item-text">{item}</span>
+                    <div className="kb-item-actions">
+                      <button
+                        className="kb-action-btn edit"
+                        onClick={() => {
+                          setEditingKbEntry({ cat: category, sub: subKey, idx: j });
+                          setKbEditValue(item);
+                        }}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        className="kb-action-btn delete"
+                        onClick={() => deleteKbEntry(category, subKey, j)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {isAddingHere ? (
+          <div className="kb-add-row">
+            <input
+              className="kb-edit-input"
+              value={kbAddValue}
+              onChange={(e) => setKbAddValue(e.target.value)}
+              placeholder="New entry..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') addKbEntry(category, subKey, kbAddValue);
+                if (e.key === 'Escape') {
+                  setAddingKbEntry(null);
+                  setKbAddValue('');
+                }
+              }}
+              autoFocus
+            />
+            <button
+              className="kb-action-btn save"
+              onClick={() => addKbEntry(category, subKey, kbAddValue)}
+            >
+              ✓
+            </button>
+            <button
+              className="kb-action-btn cancel"
+              onClick={() => {
+                setAddingKbEntry(null);
+                setKbAddValue('');
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <button
+            className="kb-add-btn"
+            onClick={() => {
+              setAddingKbEntry({ cat: category, sub: subKey });
+              setKbAddValue('');
+            }}
+          >
+            + ADD
+          </button>
+        )}
+      </div>
+    );
+  }
+
   /* ── Render ──────────────────────────────────────────────────── */
 
   return (
     <div className="dashboard">
       {error && <div className="error-toast">{error}</div>}
 
+      {/* Header with logout */}
+      <div className="dashboard-header">
+        <button className="logout-btn" onClick={onLogout}>LOGOUT</button>
+      </div>
+
       {/* Bit character */}
       <div className="bit-section">
-        <div
-          className={`bit-shape dashboard-bit ${isTrained ? 'trained' : 'untrained'}`}
-        >
+        <div className="bit-shape dashboard-bit trained">
           <div className="bit-inner" />
         </div>
         <h2 className="bit-name">{user.bit_name}</h2>
-        {!isTrained && (
-          <span className="status-badge untrained-badge">UNTRAINED</span>
-        )}
       </div>
 
-      {/* Training guide OR confidence scores */}
-      {!isTrained ? (
-        <div className="training-guide">
-          <h3 className="section-title">TRAINING GUIDE</h3>
-          <p className="section-desc">
-            Tell {user.bit_name} about yourself. Cover these topics:
-          </p>
-          <ul className="questions-list">
-            {INITIAL_QUESTIONS.map((q, i) => (
-              <li
-                key={i}
-                className={`question-item ${questionsCovered.includes(i) ? 'covered' : ''}`}
-              >
-                <span className="question-check">
-                  {questionsCovered.includes(i) ? '\u25C6' : '\u25C7'}
-                </span>
-                {q}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        <div className="confidence-section">
-          <h3 className="section-title">CONFIDENCE SCORES</h3>
-          <p className="section-desc">
-            How well {user.bit_name} can predict you:
-          </p>
-          <div className="scores-grid">
-            {SCORE_DOMAINS.map(({ key, label }) => (
-              <div key={key} className="score-item">
-                <div className="score-label">{label}</div>
-                <div className="score-bar-bg">
+      {/* Tab navigation */}
+      <div className="tab-nav">
+        {TABS.map(({ id, label }) => (
+          <button
+            key={id}
+            className={`tab-btn ${tab === id ? 'active' : ''}`}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ═══ TRAIN TAB ═══ */}
+      {tab === 'train' && (
+        <>
+          <div className="confidence-section">
+            <h3 className="section-title">CONFIDENCE SCORES</h3>
+            <p className="section-desc">
+              How well {user.bit_name} can predict you:
+            </p>
+            <div className="scores-grid">
+              {SCORE_DOMAINS.map(({ key, label }) => (
+                <div key={key} className="score-item">
                   <div
-                    className="score-bar-fill"
-                    style={{ width: `${confidenceScores[key] || 0}%` }}
-                  />
+                    className="score-header"
+                    onClick={() =>
+                      setExpandedScore(expandedScore === key ? null : key)
+                    }
+                  >
+                    <div className="score-label">{label}</div>
+                    <div className="score-value-row">
+                      <span className="score-value">
+                        {confidenceScores[key] || 0}%
+                      </span>
+                      <span className="score-why">
+                        {expandedScore === key ? '\u25B2' : 'WHY?'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="score-bar-bg">
+                    <div
+                      className="score-bar-fill"
+                      style={{ width: `${confidenceScores[key] || 0}%` }}
+                    />
+                  </div>
+                  {expandedScore === key && (
+                    <div className="score-detail">
+                      {confidenceReasoning && confidenceReasoning[key] && (
+                        <div className="score-reasoning">
+                          {confidenceReasoning[key]}
+                        </div>
+                      )}
+                      {confidenceSuggestions && confidenceSuggestions[key] && (
+                        <div className="score-suggestion">
+                          <span className="suggestion-label">TRY:</span>{' '}
+                          {confidenceSuggestions[key]}
+                        </div>
+                      )}
+                      {!confidenceReasoning && !confidenceSuggestions && (
+                        <div className="score-reasoning">
+                          Record a training session to see reasoning here.
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="score-value">
-                  {confidenceScores[key] || 0}%
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+
+          <div className="prompts-section">
+            <button
+              className="prompts-toggle"
+              onClick={() => setShowPrompts((p) => !p)}
+            >
+              <span className="section-title" style={{ margin: 0 }}>
+                CONVERSATION STARTERS
+              </span>
+              <span className="prompts-arrow">
+                {showPrompts ? '\u25B2' : '\u25BC'}
+              </span>
+            </button>
+            {showPrompts && (
+              <ul className="prompts-list">
+                {PROMPTS.map((p, i) => (
+                  <li key={i} className="prompt-item">
+                    {p}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="chat-section">
+            <div className="chat-messages">
+              {messages.length === 0 && (
+                <div className="chat-empty">
+                  Hit record and start talking to {user.bit_name}.
+                  {'\n'}Talk about anything — your day, your habits, your opinions.
+                  {'\n'}
+                  {user.bit_name} is listening.
+                </div>
+              )}
+              {messages.map((msg, i) => (
+                <div key={i} className="chat-msg user">
+                  <span className="msg-author">YOU</span>
+                  <p className="msg-text">{msg.text}</p>
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+          </div>
+
+          <div className="record-section">
+            {isProcessing ? (
+              <div className="processing-indicator">
+                <div className="processing-dots">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <span className="processing-text">Processing...</span>
+              </div>
+            ) : (
+              <button
+                className={`record-btn ${isRecording ? 'recording' : ''}`}
+                onClick={isRecording ? stopRecording : startRecording}
+              >
+                <div className="record-icon" />
+                <span>{isRecording ? 'STOP' : 'RECORD'}</span>
+              </button>
+            )}
+          </div>
+        </>
       )}
 
-      {/* Chat messages */}
-      <div className="chat-section">
-        <div className="chat-messages">
-          {messages.length === 0 && (
-            <div className="chat-empty">
-              {!isTrained
-                ? `Hit record and start talking to ${user.bit_name}.\nCover the training topics to get started.`
-                : `Keep talking to ${user.bit_name} to improve confidence scores.`}
+      {/* ═══ TRAINING DATA TAB ═══ */}
+      {tab === 'data' && (
+        <>
+          {/* Editable Profile */}
+          <div className="profile-section">
+            <div className="section-header-row">
+              <h3 className="section-title" style={{ margin: 0 }}>PROFILE</h3>
+              {!editingProfile ? (
+                <button
+                  className="inline-edit-btn"
+                  onClick={() => {
+                    setProfileDraft({
+                      name: user.name || '',
+                      ...(user.profile_data || {}),
+                    });
+                    setEditingProfile(true);
+                  }}
+                >
+                  EDIT
+                </button>
+              ) : (
+                <div className="inline-edit-actions">
+                  <button
+                    className="inline-edit-btn save"
+                    onClick={saveProfile}
+                    disabled={savingProfile}
+                  >
+                    {savingProfile ? '...' : 'SAVE'}
+                  </button>
+                  <button
+                    className="inline-edit-btn cancel"
+                    onClick={() => setEditingProfile(false)}
+                  >
+                    CANCEL
+                  </button>
+                </div>
+              )}
+            </div>
+            {editingProfile ? (
+              <div className="profile-edit-grid">
+                <div className="profile-edit-field">
+                  <label className="profile-label">NAME</label>
+                  <input
+                    className="profile-edit-input"
+                    value={profileDraft.name}
+                    onChange={(e) =>
+                      setProfileDraft((p) => ({ ...p, name: e.target.value }))
+                    }
+                  />
+                </div>
+                {PROFILE_FIELDS.map(({ key, label }) => (
+                  <div key={key} className="profile-edit-field">
+                    <label className="profile-label">{label}</label>
+                    <input
+                      className="profile-edit-input"
+                      value={profileDraft[key] || ''}
+                      onChange={(e) =>
+                        setProfileDraft((p) => ({
+                          ...p,
+                          [key]: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="profile-grid">
+                <div className="profile-item">
+                  <span className="profile-label">NAME</span>
+                  <span className="profile-value">{user.name}</span>
+                </div>
+                {PROFILE_FIELDS.map(({ key, label }) => {
+                  const val = user.profile_data?.[key];
+                  if (!val) return null;
+                  return (
+                    <div key={key} className="profile-item">
+                      <span className="profile-label">{label}</span>
+                      <span className="profile-value">{val}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Sub-nav */}
+          <div className="data-sub-nav">
+            <button
+              className={`data-sub-btn ${dataView === 'kb' ? 'active' : ''}`}
+              onClick={() => setDataView('kb')}
+            >
+              KNOWLEDGE BASE
+            </button>
+            <button
+              className={`data-sub-btn ${dataView === 'raw' ? 'active' : ''}`}
+              onClick={() => setDataView('raw')}
+            >
+              RAW TRANSCRIPTS
+            </button>
+          </div>
+
+          {/* Editable Knowledge Base */}
+          {dataView === 'kb' && (
+            <div className="training-data-section">
+              {!knowledgeBase ? (
+                <p className="section-desc">
+                  No structured knowledge yet. Record your first training session!
+                </p>
+              ) : (
+                <div className="kb-grid">
+                  {Object.entries(knowledgeBase).map(([category, content]) => {
+                    const isNested =
+                      typeof content === 'object' && !Array.isArray(content);
+                    const entries = isNested
+                      ? Object.entries(content)
+                      : [['', content]];
+
+                    return (
+                      <div key={category} className="kb-category">
+                        <h4 className="kb-category-title">
+                          {category.replace(/_/g, ' ')}
+                        </h4>
+                        {entries.map(([subKey, items]) => {
+                          if (!Array.isArray(items)) return null;
+                          // Show even empty arrays so user can add entries
+                          return (
+                            <div key={subKey || '_root'}>
+                              {items.length > 0
+                                ? renderKbItems(items, category, subKey || '')
+                                : (() => {
+                                    const isAddingHere =
+                                      addingKbEntry &&
+                                      addingKbEntry.cat === category &&
+                                      addingKbEntry.sub === (subKey || '');
+                                    return (
+                                      <div className="kb-subcategory">
+                                        {subKey && (
+                                          <span className="kb-sub-label">
+                                            {subKey.replace(/_/g, ' ')}
+                                          </span>
+                                        )}
+                                        {isAddingHere ? (
+                                          <div className="kb-add-row">
+                                            <input
+                                              className="kb-edit-input"
+                                              value={kbAddValue}
+                                              onChange={(e) =>
+                                                setKbAddValue(e.target.value)
+                                              }
+                                              placeholder="New entry..."
+                                              onKeyDown={(e) => {
+                                                if (e.key === 'Enter')
+                                                  addKbEntry(
+                                                    category,
+                                                    subKey || '',
+                                                    kbAddValue
+                                                  );
+                                                if (e.key === 'Escape') {
+                                                  setAddingKbEntry(null);
+                                                  setKbAddValue('');
+                                                }
+                                              }}
+                                              autoFocus
+                                            />
+                                            <button
+                                              className="kb-action-btn save"
+                                              onClick={() =>
+                                                addKbEntry(
+                                                  category,
+                                                  subKey || '',
+                                                  kbAddValue
+                                                )
+                                              }
+                                            >
+                                              ✓
+                                            </button>
+                                            <button
+                                              className="kb-action-btn cancel"
+                                              onClick={() => {
+                                                setAddingKbEntry(null);
+                                                setKbAddValue('');
+                                              }}
+                                            >
+                                              ✕
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <button
+                                            className="kb-add-btn"
+                                            onClick={() => {
+                                              setAddingKbEntry({
+                                                cat: category,
+                                                sub: subKey || '',
+                                              });
+                                              setKbAddValue('');
+                                            }}
+                                          >
+                                            + ADD
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
-          {messages.map((msg, i) => (
-            <div key={i} className={`chat-msg ${msg.role}`}>
-              <span className="msg-author">
-                {msg.role === 'user' ? 'YOU' : user.bit_name.toUpperCase()}
-              </span>
-              <p className="msg-text">{msg.text}</p>
-            </div>
-          ))}
-          <div ref={chatEndRef} />
-        </div>
-      </div>
 
-      {/* Record button */}
-      <div className="record-section">
-        {isProcessing ? (
-          <div className="processing-indicator">
-            <div className="processing-dots">
-              <span />
-              <span />
-              <span />
+          {/* Raw Transcripts (read-only) */}
+          {dataView === 'raw' && (
+            <div className="training-data-section">
+              <p className="section-desc">
+                {allTrainingData.length === 0
+                  ? 'No training data yet. Record your first session!'
+                  : `${allTrainingData.length} training session${allTrainingData.length !== 1 ? 's' : ''} stored`}
+              </p>
+              <div className="training-data-list">
+                {allTrainingData.map((entry, i) => (
+                  <div key={i} className="training-data-item">
+                    <div className="training-data-meta">
+                      <span className="training-data-num">#{i + 1}</span>
+                      <span className="training-data-time">
+                        {new Date(entry.created_at).toLocaleDateString(
+                          undefined,
+                          {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }
+                        )}
+                      </span>
+                    </div>
+                    <p className="training-data-text">{entry.user_message}</p>
+                  </div>
+                ))}
+              </div>
             </div>
-            <span className="processing-text">Processing...</span>
-          </div>
-        ) : (
-          <button
-            className={`record-btn ${isRecording ? 'recording' : ''}`}
-            onClick={isRecording ? stopRecording : startRecording}
-          >
-            <div className="record-icon" />
-            <span>{isRecording ? 'STOP' : 'RECORD'}</span>
-          </button>
-        )}
-      </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
