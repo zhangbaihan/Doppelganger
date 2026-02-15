@@ -448,14 +448,17 @@ export default function Dashboard({ token, user, onUserUpdate, onLogout }) {
       }
 
       if (data.type === 'freestyle') {
+        setMessages((prev) => {
+          const updated = [...prev];
+          // If this is the first message and Bit started with a prompt, include it
+          if (prev.length === 0 && conversationStarterPrompt) {
+            updated.push({ role: 'assistant', text: conversationStarterPrompt });
+          }
+          updated.push({ role: 'user', text: data.userMessage });
+          updated.push({ role: 'assistant', text: data.agentResponse || '' });
+          return updated;
+        });
         setConversationStarterPrompt(null);
-        // Add assistant response (user message already shown optimistically)
-        if (data.agentResponse) {
-          setMessages((prev) => [
-            ...prev,
-            { role: 'assistant', text: data.agentResponse },
-          ]);
-        }
         if (data.confidenceScores) setConfidenceScores(data.confidenceScores);
         if (data.confidenceReasoning) setConfidenceReasoning(data.confidenceReasoning);
         if (data.confidenceSuggestions) setConfidenceSuggestions(data.confidenceSuggestions);
